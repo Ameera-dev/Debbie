@@ -1,0 +1,56 @@
+
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <defs>
+    <clipPath id="clipC"><rect width="1024" height="1024" rx="228" ry="228"/></clipPath>
+    <linearGradient id="bgC" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FBF6EC"/>
+      <stop offset="1" stop-color="#E8DDC6"/>
+    </linearGradient>
+    <radialGradient id="pearlC" cx=".4" cy=".3" r=".7">
+      <stop offset="0" stop-color="#FFFDF6"/>
+      <stop offset="1" stop-color="#C9A462"/>
+    </radialGradient>
+  </defs>
+  <g clip-path="url(#clipC)">
+    <rect width="1024" height="1024" fill="url(#bgC)"/>
+    <g style="mix-blend-mode: multiply;">
+      <g transform="translate(512 520) rotate(0)">
+        <g transform="translate(0 -118)">
+          <path d="M 0 -336 C 97.2 -235.2, 113.4 84, 0 194.88 C -113.4 84, -97.2 -235.2, 0 -336 Z" fill="#3E6C7E" opacity="0.55"/>
+        </g>
+      </g>
+      <g transform="translate(512 520) rotate(51.42857142857142)">
+        <g transform="translate(0 -118)">
+          <path d="M 0 -336 C 97.2 -235.2, 113.4 84, 0 194.88 C -113.4 84, -97.2 -235.2, 0 -336 Z" fill="#3E6C7E" opacity="0.82"/>
+        </g>
+      </g>
+      <g transform="translate(512 520) rotate(102.85714285714285)">
+        <g transform="translate(0 -118)">
+          <path d="M 0 -336 C 97.2 -235.2, 113.4 84, 0 194.88 C -113.4 84, -97.2 -235.2, 0 -336 Z" fill="#3E6C7E" opacity="0.89"/>
+        </g>
+      </g>
+      <g transform="translate(512 520) rotate(154.28571428571428)">
+        <g transform="translate(0 -118)">
+          <path d="M 0 -336 C 97.2 -235.2, 113.4 84, 0 194.88 C -113.4 84, -97.2 -235.2, 0 -336 Z" fill="#3E6C7E" opacity="0.70"/>
+        </g>
+      </g>
+      <g transform="translate(512 520) rotate(205.7142857142857)">
+        <g transform="translate(0 -118)">
+          <path d="M 0 -336 C 97.2 -235.2, 113.4 84, 0 194.88 C -113.4 84, -97.2 -235.2, 0 -336 Z" fill="#3E6C7E" opacity="0.40"/>
+        </g>
+      </g>
+      <g transform="translate(512 520) rotate(257.14285714285717)">
+        <g transform="translate(0 -118)">
+          <path d="M 0 -336 C 97.2 -235.2, 113.4 84, 0 194.88 C -113.4 84, -97.2 -235.2, 0 -336 Z" fill="#3E6C7E" opacity="0.21"/>
+        </g>
+      </g>
+      <g transform="translate(512 520) rotate(308.57142857142856)">
+        <g transform="translate(0 -118)">
+          <path d="M 0 -336 C 97.2 -235.2, 113.4 84, 0 194.88 C -113.4 84, -97.2 -235.2, 0 -336 Z" fill="#3E6C7E" opacity="0.28"/>
+        </g>
+      </g></g>
+    <!-- pearl center -->
+    <circle cx="512" cy="520" r="74" fill="url(#pearlC)"/>
+    <circle cx="492" cy="498" r="18" fill="#fff" opacity=".65"/>
+  </g>
+</svg>
