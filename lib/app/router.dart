@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'theme.dart';
 import '../data/models/value_model.dart';
 import '../data/models/values_plan_model.dart';
+import '../features/dashboard/screens/budget_plan_screen.dart';
 import '../features/dashboard/screens/dashboard_screen.dart';
 import '../features/onboarding/screens/completion_screen.dart';
 import '../features/onboarding/screens/plan_screen.dart';
@@ -17,6 +18,8 @@ import '../features/reflect/screens/money_story_screen.dart';
 import '../features/reflect/screens/reflect_screen.dart';
 import '../features/settings/screens/settings_screen.dart';
 import '../features/splash/splash_screen.dart';
+import '../features/recurring/screens/add_recurring_screen.dart';
+import '../features/recurring/screens/recurring_screen.dart';
 import '../features/transactions/screens/add_session_screen.dart';
 import '../features/transactions/screens/transaction_detail_screen.dart';
 import '../features/transactions/screens/transactions_screen.dart';
@@ -189,11 +192,39 @@ final routerProvider = Provider<GoRouter>((ref) {
         ),
       ),
 
+      // ── Budget plan (full-screen, accessible from Dashboard) ──────
+      GoRoute(
+        path: '/budget-plan',
+        pageBuilder: (_, state) =>
+            _slidePage(state.pageKey, const BudgetPlanScreen()),
+      ),
+
       // ── Analytics (full-screen, accessible from Dashboard) ────────
       GoRoute(
         path: '/analytics',
         pageBuilder: (_, state) =>
             _slidePage(state.pageKey, const AnalyticsScreen()),
+      ),
+
+      // ── Recurring expenses ────────────────────────────────────────
+      GoRoute(
+        path: '/recurring',
+        pageBuilder: (_, state) =>
+            _slidePage(state.pageKey, const RecurringScreen()),
+      ),
+      GoRoute(
+        path: '/recurring/add',
+        pageBuilder: (_, state) =>
+            _slidePage(state.pageKey, const AddRecurringScreen()),
+      ),
+      GoRoute(
+        path: '/recurring/edit',
+        pageBuilder: (_, state) => _slidePage(
+          state.pageKey,
+          AddRecurringScreen(
+            editExpense: state.extra as dynamic,
+          ),
+        ),
       ),
 
       // ── Main shell with bottom nav ────────────────────────────────

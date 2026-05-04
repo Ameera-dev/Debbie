@@ -4,7 +4,11 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 
 import '../../../app/theme.dart';
+import '../../../data/models/goal_model.dart';
+import '../../../data/models/value_model.dart';
+import '../../../shared/utils/id_generator.dart';
 import '../../../providers/database_provider.dart';
+import '../../../providers/goals_provider.dart';
 import '../../../providers/settings_provider.dart';
 import '../../../providers/values_provider.dart';
 import '../../../services/export_service.dart';
@@ -40,6 +44,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final lastBackup = ref.watch(lastBackupDateProvider).valueOrNull;
     final coolingOffThreshold =
         ref.watch(coolingOffThresholdProvider).valueOrNull ?? 500000;
+    final goals = ref.watch(goalsProvider).valueOrNull ?? const <GoalModel>[];
 
     return Scaffold(
       appBar: AppBar(
@@ -136,6 +141,122 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               }),
               const Divider(),
             ],
+
+            // ── Impact Goals ──────────────────────────────────────────
+            _SectionHeader(title: 'Impact Goals'),
+            if (goals.isEmpty)
+              ListTile(
+                leading: const Icon(Icons.flag_outlined),
+                title: const Text('No goals yet'),
+                subtitle: Text(
+                  'Create one to channel your spending toward what matters.',
+                  style: TextStyle(color: AppColors.textSecondary),
+                ),
+                trailing: const Icon(Icons.add),
+                onTap: () => _showGoalDialog(values: values),
+              )
+            else ...[
+              ...goals.map((goal) {
+                final ValueModel? value = values
+                    .where((v) => v.id == goal.valueId)
+                    .firstOrNull;
+                final valueIcon = value?.icon ?? '🎯';
+                final valueName = value?.name ?? 'Unlinked';
+                final progress = goal.progressPercent;
+                final progressLabel = goal.targetAmount != null
+                    ? '${CurrencyUtils.format(goal.currentAmount)} / ${CurrencyUtils.format(goal.targetAmount!)}'
+                    : CurrencyUtils.format(goal.currentAmount);
+                return ListTile(
+                  leading: Text(
+                    valueIcon,
+                    style: const TextStyle(fontSize: 20),
+                  ),
+                  title: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          goal.title,
+                          style: TextStyle(
+                            decoration: goal.isCompleted
+                                ? TextDecoration.lineThrough
+                                : null,
+                          ),
+                        ),
+                      ),
+                      if (goal.isCompleted)
+                        const Icon(
+                          Icons.check_circle,
+                          size: 16,
+                          color: AppColors.income,
+                        ),
+                    ],
+                  ),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '$valueName · $progressLabel',
+                        style: TextStyle(color: AppColors.textSecondary),
+                      ),
+                      if (progress != null) ...[
+                        const SizedBox(height: 4),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(4),
+                          child: LinearProgressIndicator(
+                            value: progress,
+                            minHeight: 4,
+                            backgroundColor: AppColors.divider,
+                            valueColor: AlwaysStoppedAnimation(
+                              goal.isCompleted
+                                  ? AppColors.income
+                                  : AppColors.primary,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  trailing: PopupMenuButton<String>(
+                    onSelected: (action) =>
+                        _handleGoalAction(action, goal, values),
+                    itemBuilder: (_) => [
+                      const PopupMenuItem(value: 'edit', child: Text('Edit')),
+                      PopupMenuItem(
+                        value: goal.isCompleted ? 'reactivate' : 'complete',
+                        child: Text(
+                          goal.isCompleted
+                              ? 'Mark as active'
+                              : 'Mark as complete',
+                        ),
+                      ),
+                      PopupMenuItem(
+                        value: 'delete',
+                        child: Text(
+                          'Delete',
+                          style: TextStyle(color: AppColors.expense),
+                        ),
+                      ),
+                    ],
+                  ),
+                  onTap: () => _showGoalDialog(values: values, existing: goal),
+                );
+              }),
+              ListTile(
+                leading: const Icon(
+                  Icons.add_circle_outline,
+                  color: AppColors.primary,
+                ),
+                title: Text(
+                  'Add a goal',
+                  style: TextStyle(
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                onTap: () => _showGoalDialog(values: values),
+              ),
+            ],
+            const Divider(),
 
             // ── AI Reflection ─────────────────────────────────────────
             _SectionHeader(title: AppStrings.settingsAiReflection),
@@ -358,6 +479,167 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
         ],
       ),
     );
+  }
+
+  // ── Goals ───────────────────────────────────────────────────────────────
+
+  Future<void> _handleGoalAction(
+    String action,
+    GoalModel goal,
+    List<ValueModel> values,
+  ) async {
+    switch (action) {
+      case 'edit':
+        await _showGoalDialog(values: values, existing: goal);
+      case 'complete':
+        await ref.read(goalsProvider.notifier).edit(
+          goal.copyWith(status: 'completed', completedAt: DateTime.now()),
+        );
+      case 'reactivate':
+        await ref.read(goalsProvider.notifier).edit(
+          goal.copyWith(status: 'active', clearCompletedAt: true),
+        );
+      case 'delete':
+        await _confirmDeleteGoal(goal);
+    }
+  }
+
+  Future<void> _confirmDeleteGoal(GoalModel goal) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete this goal?'),
+        content: Text(
+          'This removes "${goal.title}" permanently. Linked transactions stay.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.expense),
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await ref.read(goalsProvider.notifier).remove(goal.id);
+    }
+  }
+
+  Future<void> _showGoalDialog({
+    required List<ValueModel> values,
+    GoalModel? existing,
+  }) async {
+    if (values.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Add at least one value before creating a goal.'),
+        ),
+      );
+      return;
+    }
+    final titleController = TextEditingController(text: existing?.title ?? '');
+    final targetController = TextEditingController(
+      text: existing?.targetAmount?.toString() ?? '',
+    );
+    String selectedValueId = existing?.valueId ?? values.first.id;
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setLocalState) => AlertDialog(
+          title: Text(existing == null ? 'New goal' : 'Edit goal'),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                TextField(
+                  controller: titleController,
+                  textCapitalization: TextCapitalization.sentences,
+                  decoration: const InputDecoration(
+                    labelText: 'Title',
+                    hintText: 'e.g. Family trip',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  initialValue: selectedValueId,
+                  decoration: const InputDecoration(
+                    labelText: 'Linked value',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: values
+                      .map(
+                        (v) => DropdownMenuItem(
+                          value: v.id,
+                          child: Text('${v.icon}  ${v.name}'),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (v) {
+                    if (v != null) setLocalState(() => selectedValueId = v);
+                  },
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: targetController,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Target amount (optional)',
+                    prefixText: 'Rp ',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (result != true) return;
+    final title = titleController.text.trim();
+    if (title.isEmpty) return;
+    final target = int.tryParse(targetController.text.trim());
+
+    if (existing == null) {
+      await ref.read(goalsProvider.notifier).add(
+        GoalModel(
+          id: IdGenerator.generate(),
+          title: title,
+          valueId: selectedValueId,
+          targetAmount: target,
+          currentAmount: 0,
+          status: 'active',
+          createdAt: DateTime.now(),
+        ),
+      );
+    } else {
+      await ref.read(goalsProvider.notifier).edit(
+        existing.copyWith(
+          title: title,
+          valueId: selectedValueId,
+          targetAmount: target,
+          clearTargetAmount: target == null,
+        ),
+      );
+    }
   }
 
   // ── Google Sign-In ──────────────────────────────────────────────────────

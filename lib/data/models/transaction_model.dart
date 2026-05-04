@@ -8,11 +8,14 @@ class TransactionModel {
     this.status = recordedStatus,
     this.title,
     this.notes,
-    this.imagePath,
     this.pendingUntil,
     this.emotion,
+    this.latitude,
+    this.longitude,
+    this.locationLabel,
     required this.createdAt,
     this.items = const <TransactionItemModel>[],
+    this.images = const <String>[],
   });
 
   static const recordedStatus = 'recorded';
@@ -22,13 +25,19 @@ class TransactionModel {
   final String type; // 'income' | 'expense'
   final DateTime date;
   final String status;
-  final String? title; // user-given label for the transaction
+  final String? title;
   final String? notes;
-  final String? imagePath; // relative path to attached image
   final DateTime? pendingUntil;
   final String? emotion;
+  final double? latitude;
+  final double? longitude;
+  final String? locationLabel;
   final DateTime createdAt;
   final List<TransactionItemModel> items;
+  final List<String> images; // relative paths, ordered by sort_order
+
+  bool get hasLocation => latitude != null && longitude != null;
+  bool get hasImages => images.isNotEmpty;
 
   bool get isExpense => type == 'expense';
   bool get isIncome => type == 'income';
@@ -39,12 +48,9 @@ class TransactionModel {
       pendingUntil != null &&
       !pendingUntil!.isAfter(DateTime.now());
 
-  /// Sum of all item amounts.
   int get totalAmount => items.fold(0, (sum, item) => sum + item.amount);
-
   int get itemCount => items.length;
 
-  /// Display name: title if set, otherwise auto-generated from items.
   String get displayTitle {
     if (title != null && title!.isNotEmpty) return title!;
     if (items.isEmpty) return '';
@@ -63,16 +69,19 @@ class TransactionModel {
     String? status,
     String? title,
     String? notes,
-    String? imagePath,
     DateTime? pendingUntil,
     String? emotion,
+    double? latitude,
+    double? longitude,
+    String? locationLabel,
     DateTime? createdAt,
     List<TransactionItemModel>? items,
+    List<String>? images,
     bool clearTitle = false,
     bool clearNotes = false,
-    bool clearImagePath = false,
     bool clearPendingUntil = false,
     bool clearEmotion = false,
+    bool clearLocation = false,
   }) {
     return TransactionModel(
       id: id ?? this.id,
@@ -81,17 +90,17 @@ class TransactionModel {
       status: status ?? this.status,
       title: clearTitle ? null : (title ?? this.title),
       notes: clearNotes ? null : (notes ?? this.notes),
-      imagePath: clearImagePath ? null : (imagePath ?? this.imagePath),
-      pendingUntil: clearPendingUntil
-          ? null
-          : (pendingUntil ?? this.pendingUntil),
+      pendingUntil: clearPendingUntil ? null : (pendingUntil ?? this.pendingUntil),
       emotion: clearEmotion ? null : (emotion ?? this.emotion),
+      latitude: clearLocation ? null : (latitude ?? this.latitude),
+      longitude: clearLocation ? null : (longitude ?? this.longitude),
+      locationLabel: clearLocation ? null : (locationLabel ?? this.locationLabel),
       createdAt: createdAt ?? this.createdAt,
       items: items ?? this.items,
+      images: images ?? this.images,
     );
   }
 
-  /// Serializes session-level fields only (not items).
   Map<String, dynamic> toMap() {
     return {
       'id': id,
@@ -100,9 +109,11 @@ class TransactionModel {
       'date': date.toIso8601String(),
       'title': title,
       'notes': notes,
-      'image_path': imagePath,
       'pending_until': pendingUntil?.toIso8601String(),
       'emotion': emotion,
+      'latitude': latitude,
+      'longitude': longitude,
+      'location_label': locationLabel,
       'created_at': createdAt.toIso8601String(),
     };
   }
@@ -115,13 +126,15 @@ class TransactionModel {
       date: DateTime.parse(map['date'] as String),
       title: map['title'] as String?,
       notes: map['notes'] as String?,
-      imagePath: map['image_path'] as String?,
       pendingUntil: (map['pending_until'] as String?) != null
           ? DateTime.parse(map['pending_until'] as String)
           : null,
       emotion: map['emotion'] as String?,
+      latitude: map['latitude'] as double?,
+      longitude: map['longitude'] as double?,
+      locationLabel: map['location_label'] as String?,
       createdAt: DateTime.parse(map['created_at'] as String),
-      // items populated by the repository after a join/second query
+      // images and items populated by the repository
     );
   }
 

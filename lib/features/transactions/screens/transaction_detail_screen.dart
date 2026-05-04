@@ -67,19 +67,19 @@ class _DetailView extends ConsumerStatefulWidget {
 }
 
 class _DetailViewState extends ConsumerState<_DetailView> {
-  File? _imageFile;
+  final List<File> _imageFiles = [];
 
   @override
   void initState() {
     super.initState();
-    _loadImage();
+    _loadImages();
   }
 
-  Future<void> _loadImage() async {
-    final path = widget.transaction.imagePath;
-    if (path == null) return;
-    final file = await ref.read(imageServiceProvider).getFile(path);
-    if (mounted) setState(() => _imageFile = file);
+  Future<void> _loadImages() async {
+    for (final path in widget.transaction.images) {
+      final file = await ref.read(imageServiceProvider).getFile(path);
+      if (mounted && file != null) setState(() => _imageFiles.add(file));
+    }
   }
 
   @override
@@ -185,58 +185,123 @@ class _DetailViewState extends ConsumerState<_DetailView> {
             ),
           ],
 
-          // ── Attached image ───────────────────────────────────────
-          if (_imageFile != null) ...[
-            const _SectionHeader(icon: Icons.photo_outlined, label: 'Receipt'),
+          // ── Location ────────────────────────────────────────────
+          if (tx.locationLabel != null) ...[
+            const _SectionHeader(
+              icon: Icons.location_on_outlined,
+              label: 'Location',
+            ),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: GestureDetector(
-                onTap: () => _openFullscreen(context),
-                child: ClipRRect(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 12,
+                ),
+                decoration: BoxDecoration(
+                  color: AppColors.secondary.withValues(alpha: 0.06),
                   borderRadius: BorderRadius.circular(14),
-                  child: Stack(
-                    children: [
-                      Image.file(
-                        _imageFile!,
-                        width: double.infinity,
-                        height: 200,
-                        fit: BoxFit.cover,
-                      ),
-                      Positioned(
-                        bottom: 8,
-                        right: 8,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 5,
-                          ),
-                          decoration: BoxDecoration(
-                            color: Colors.black54,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: const Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(
-                                Icons.zoom_in,
-                                size: 14,
-                                color: Colors.white,
-                              ),
-                              SizedBox(width: 4),
-                              Text(
-                                'Tap to zoom',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 11,
+                  border: Border.all(
+                    color: AppColors.secondary.withValues(alpha: 0.15),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.location_on_rounded,
+                      size: 18,
+                      color: AppColors.secondary,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            tx.locationLabel!,
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(
+                                  color: AppColors.secondaryDeep,
                                   fontWeight: FontWeight.w500,
                                 ),
-                              ),
-                            ],
                           ),
+                          if (tx.latitude != null && tx.longitude != null) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              '${tx.latitude!.toStringAsFixed(5)}, ${tx.longitude!.toStringAsFixed(5)}',
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(
+                                    color: AppColors.textSecondary,
+                                    fontFamily: 'JetBrains Mono',
+                                    fontSize: 11,
+                                  ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+
+          // ── Attached images ──────────────────────────────────────
+          if (_imageFiles.isNotEmpty) ...[
+            _SectionHeader(
+              icon: Icons.photo_outlined,
+              label: 'Photos (${_imageFiles.length})',
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: SizedBox(
+                height: 160,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: _imageFiles.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 8),
+                  itemBuilder: (context, i) {
+                    return GestureDetector(
+                      onTap: () => _openFullscreen(context, startIndex: i),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(12),
+                        child: Stack(
+                          children: [
+                            Image.file(
+                              _imageFiles[i],
+                              width: 160,
+                              height: 160,
+                              fit: BoxFit.cover,
+                            ),
+                            Positioned(
+                              bottom: 6,
+                              right: 6,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 6,
+                                  vertical: 3,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.black54,
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.zoom_in,
+                                      size: 12,
+                                      color: Colors.white,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                    ],
-                  ),
+                    );
+                  },
                 ),
               ),
             ),
@@ -290,17 +355,13 @@ class _DetailViewState extends ConsumerState<_DetailView> {
     );
   }
 
-  void _openFullscreen(BuildContext context) {
+  void _openFullscreen(BuildContext context, {int startIndex = 0}) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         fullscreenDialog: true,
-        builder: (_) => Scaffold(
-          backgroundColor: Colors.black,
-          appBar: AppBar(
-            backgroundColor: Colors.black,
-            iconTheme: const IconThemeData(color: Colors.white),
-          ),
-          body: PhotoView(imageProvider: FileImage(_imageFile!)),
+        builder: (_) => _ImageGalleryViewer(
+          files: _imageFiles,
+          initialIndex: startIndex,
         ),
       ),
     );
@@ -333,10 +394,9 @@ class _DetailViewState extends ConsumerState<_DetailView> {
 
     if (confirmed != true || !mounted) return;
 
-    final imagePath = widget.transaction.imagePath;
-    if (imagePath != null) {
-      await ref.read(imageServiceProvider).delete(imagePath);
-    }
+    await ref
+        .read(imageServiceProvider)
+        .deleteAll(widget.transaction.images);
 
     HapticFeedback.lightImpact();
     await ref.read(transactionsProvider.notifier).remove(widget.transaction.id);
@@ -407,7 +467,7 @@ class _HeroHeader extends StatelessWidget {
               ),
               const SizedBox(width: 4),
               Text(
-                AppDateUtils.formatDate(tx.date),
+                '${AppDateUtils.formatDate(tx.date)} · ${AppDateUtils.formatTime(tx.date)}',
                 style: Theme.of(
                   context,
                 ).textTheme.bodySmall?.copyWith(color: AppColors.textSecondary),
@@ -799,6 +859,68 @@ class _MiniChip extends StatelessWidget {
         ),
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Full-screen swipeable image gallery
+// ---------------------------------------------------------------------------
+
+class _ImageGalleryViewer extends StatefulWidget {
+  const _ImageGalleryViewer({
+    required this.files,
+    required this.initialIndex,
+  });
+
+  final List<File> files;
+  final int initialIndex;
+
+  @override
+  State<_ImageGalleryViewer> createState() => _ImageGalleryViewerState();
+}
+
+class _ImageGalleryViewerState extends State<_ImageGalleryViewer> {
+  late final PageController _pageController;
+  late int _currentIndex;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentIndex = widget.initialIndex;
+    _pageController = PageController(initialPage: widget.initialIndex);
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        iconTheme: const IconThemeData(color: Colors.white),
+        title: widget.files.length > 1
+            ? Text(
+                '${_currentIndex + 1} / ${widget.files.length}',
+                style: const TextStyle(color: Colors.white, fontSize: 14),
+              )
+            : null,
+      ),
+      body: PageView.builder(
+        controller: _pageController,
+        itemCount: widget.files.length,
+        onPageChanged: (i) => setState(() => _currentIndex = i),
+        itemBuilder: (context, i) => PhotoView(
+          imageProvider: FileImage(widget.files[i]),
+          minScale: PhotoViewComputedScale.contained,
+          maxScale: PhotoViewComputedScale.covered * 3,
+        ),
       ),
     );
   }

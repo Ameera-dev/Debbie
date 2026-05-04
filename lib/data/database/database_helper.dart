@@ -7,7 +7,7 @@ class DatabaseHelper {
   DatabaseHelper._();
 
   static const _dbName = 'debbie.db';
-  static const _dbVersion = 7;
+  static const _dbVersion = 11;
 
   static DatabaseHelper? _instance;
   static Database? _database;
@@ -65,6 +65,18 @@ class DatabaseHelper {
     }
     if (oldVersion < 7) {
       await _migrateV6toV7(db);
+    }
+    if (oldVersion < 8) {
+      await _migrateV7toV8(db);
+    }
+    if (oldVersion < 9) {
+      await _migrateV8toV9(db);
+    }
+    if (oldVersion < 10) {
+      await _migrateV9toV10(db);
+    }
+    if (oldVersion < 11) {
+      await _migrateV10toV11(db);
     }
   }
 
@@ -177,6 +189,46 @@ class DatabaseHelper {
       'ALTER TABLE ${Tables.journal} ADD COLUMN ai_response TEXT',
     );
     await db.execute(Tables.createAiReflections);
+  }
+
+  /// v9 → v10: create transaction_images table and migrate existing image_path values.
+  Future<void> _migrateV9toV10(Database db) async {
+    await db.execute(Tables.createTransactionImages);
+    // Migrate existing single image_path values into the new table
+    await db.execute('''
+      INSERT INTO ${Tables.transactionImages} (id, transaction_id, image_path, sort_order, created_at)
+      SELECT lower(hex(randomblob(4)) || '-' || hex(randomblob(2)) || '-4' ||
+             substr(hex(randomblob(2)),2) || '-' ||
+             substr('89ab',abs(random()) % 4 + 1, 1) ||
+             substr(hex(randomblob(2)),2) || '-' || hex(randomblob(6))),
+             id, image_path, 0, created_at
+      FROM ${Tables.transactions}
+      WHERE image_path IS NOT NULL
+    ''');
+  }
+
+  /// v8 → v9: add location fields to transactions.
+  Future<void> _migrateV8toV9(Database db) async {
+    await db.execute(
+      'ALTER TABLE ${Tables.transactions} ADD COLUMN latitude REAL',
+    );
+    await db.execute(
+      'ALTER TABLE ${Tables.transactions} ADD COLUMN longitude REAL',
+    );
+    await db.execute(
+      'ALTER TABLE ${Tables.transactions} ADD COLUMN location_label TEXT',
+    );
+  }
+
+  /// v7 → v8: add recurring expenses and payments tables.
+  Future<void> _migrateV7toV8(Database db) async {
+    await db.execute(Tables.createRecurringExpenses);
+    await db.execute(Tables.createRecurringExpensePayments);
+  }
+
+  /// v10 → v11: add daily plan/actualization rows for weekly budgeting.
+  Future<void> _migrateV10toV11(Database db) async {
+    await db.execute(Tables.createWeeklyBudgetPlans);
   }
 
   Future<void> close() async {

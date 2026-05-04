@@ -5,9 +5,11 @@ import '../data/repositories/ai_reflections_repository.dart';
 import '../data/repositories/daily_intentions_repository.dart';
 import '../data/repositories/goals_repository.dart';
 import '../data/repositories/journal_repository.dart';
+import '../data/repositories/recurring_expenses_repository.dart';
 import '../data/repositories/settings_repository.dart';
 import '../data/repositories/transactions_repository.dart';
 import '../data/repositories/values_repository.dart';
+import '../data/repositories/weekly_budget_repository.dart';
 
 final databaseHelperProvider = Provider<DatabaseHelper>((ref) {
   return DatabaseHelper.instance;
@@ -43,4 +45,13 @@ final aiReflectionsRepositoryProvider = Provider<AiReflectionsRepository>((
   ref,
 ) {
   return AiReflectionsRepository(ref.watch(databaseHelperProvider));
+});
+
+final recurringExpensesRepositoryProvider =
+    Provider<RecurringExpensesRepository>((ref) {
+      return RecurringExpensesRepository(ref.watch(databaseHelperProvider));
+    });
+
+final weeklyBudgetRepositoryProvider = Provider<WeeklyBudgetRepository>((ref) {
+  return WeeklyBudgetRepository(ref.watch(databaseHelperProvider));
 });

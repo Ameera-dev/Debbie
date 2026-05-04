@@ -1,5 +1,27 @@
 import 'package:intl/intl.dart';
 
+enum TxRange {
+  today,
+  week,
+  month,
+  threeMonths,
+  sixMonths,
+  oneYear,
+  threeYears,
+  fiveYears;
+
+  String get label => switch (this) {
+    TxRange.today => 'Today',
+    TxRange.week => 'Week',
+    TxRange.month => 'Month',
+    TxRange.threeMonths => '3M',
+    TxRange.sixMonths => '6M',
+    TxRange.oneYear => '1Y',
+    TxRange.threeYears => '3Y',
+    TxRange.fiveYears => '5Y',
+  };
+}
+
 class AppDateUtils {
   AppDateUtils._();
 
@@ -92,5 +114,63 @@ class AppDateUtils {
     final start = DateTime(year, month, 1);
     final end = DateTime(year, month + 1, 1).subtract(const Duration(days: 1));
     return (start, end);
+  }
+
+  /// Date range [from, to] for a given [TxRange] ending now.
+  static (DateTime, DateTime) rangeFor(TxRange range) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day, 23, 59, 59);
+    final from = switch (range) {
+      TxRange.today => DateTime(now.year, now.month, now.day),
+      TxRange.week => startOfWeek(now),
+      TxRange.month => DateTime(now.year, now.month, 1),
+      TxRange.threeMonths => DateTime(now.year, now.month - 2, 1),
+      TxRange.sixMonths => DateTime(now.year, now.month - 5, 1),
+      TxRange.oneYear => DateTime(now.year - 1, now.month + 1, 1),
+      TxRange.threeYears => DateTime(now.year - 3, now.month + 1, 1),
+      TxRange.fiveYears => DateTime(now.year - 5, now.month + 1, 1),
+    };
+    return (from, today);
+  }
+
+  /// Group label for a transaction date within a given [TxRange].
+  static String groupLabelForRange(DateTime date, TxRange range) {
+    final now = DateTime.now();
+    switch (range) {
+      case TxRange.today:
+        final h = date.hour;
+        if (h < 6) return 'Night';
+        if (h < 12) return 'Morning';
+        if (h < 17) return 'Afternoon';
+        if (h < 21) return 'Evening';
+        return 'Night';
+
+      case TxRange.week:
+        final d = startOfDay(date);
+        final today = startOfDay(now);
+        final diff = today.difference(d).inDays;
+        if (diff == 0) return 'Today';
+        if (diff == 1) return 'Yesterday';
+        return DateFormat('EEEE, d MMM').format(date);
+
+      case TxRange.month:
+        final d = startOfDay(date);
+        final today = startOfDay(now);
+        final diff = today.difference(d).inDays;
+        if (diff == 0) return 'Today';
+        if (diff == 1) return 'Yesterday';
+        return DateFormat('d MMM').format(date);
+
+      case TxRange.threeMonths:
+      case TxRange.sixMonths:
+        return DateFormat('MMMM yyyy').format(date);
+
+      case TxRange.oneYear:
+        return DateFormat('MMM yyyy').format(date);
+
+      case TxRange.threeYears:
+      case TxRange.fiveYears:
+        return date.year.toString();
+    }
   }
 }

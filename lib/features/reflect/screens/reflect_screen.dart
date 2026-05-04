@@ -11,7 +11,6 @@ import '../../../providers/journal_provider.dart';
 import '../../../providers/transactions_provider.dart';
 import '../../../providers/values_provider.dart';
 import '../../../services/ai_reflection_service.dart';
-import '../../../shared/constants/mindfulness.dart';
 import '../../../shared/constants/strings.dart';
 import '../../../shared/utils/currency.dart';
 import '../../../shared/utils/date_utils.dart';
@@ -94,6 +93,8 @@ class ReflectScreen extends ConsumerWidget {
 
     final legacyEntries = entries.where((entry) => entry.isLegacyEntry).toList()
       ..sort((a, b) => b.date.compareTo(a.date));
+    final weeklyExpenseTotal = _totalForType(weekTransactions, 'expense');
+    final weeklyIncomeTotal = _totalForType(weekTransactions, 'income');
 
     void openCurrentWeekCheckIn() {
       if (currentWeekCheckIn != null) {
@@ -101,6 +102,14 @@ class ReflectScreen extends ConsumerWidget {
         return;
       }
       context.push('/reflect/new');
+    }
+
+    void openCurrentMonthStory() {
+      if (currentMonthStory != null) {
+        context.push('/reflect/money-story/${currentMonthStory.id}');
+        return;
+      }
+      context.push('/reflect/money-story');
     }
 
     return Scaffold(
@@ -131,7 +140,7 @@ class ReflectScreen extends ConsumerWidget {
                 ),
               ),
               subtitle:
-                  'One weekly insight, one deeper check-in, and the spending notes that shaped it.',
+                  'Weekly check-in, monthly story, and the notes behind them.',
               trailing: const TideSurfaceIcon(icon: Icons.waves_rounded),
               actions: [
                 TideHeaderIconButton(
@@ -149,13 +158,21 @@ class ReflectScreen extends ConsumerWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const _SectionIntro(
-                      eyebrow: 'This week',
-                      title: "This Week's Insight",
-                      subtitle:
-                          'A single narrative built from your spending notes and weekly check-in.',
+                    _ReflectMenuCard(
+                      weekStart: weekStart,
+                      monthStart: monthStart,
+                      hasWeeklyCheckIn:
+                          currentWeekCheckIn?.content.trim().isNotEmpty ??
+                          false,
+                      hasMonthStory:
+                          currentMonthStory?.content.trim().isNotEmpty ?? false,
+                      transactionCount: weekTransactions.length,
+                      noteCount: noteTransactions.length,
+                      totalExpense: weeklyExpenseTotal,
+                      onOpenCheckIn: openCurrentWeekCheckIn,
+                      onOpenMoneyStory: openCurrentMonthStory,
                     ),
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 16),
                     _ThisWeekInsightCard(
                       signature: _insightSignature(
                         weeklySpending: weeklySpending,
@@ -169,69 +186,17 @@ class ReflectScreen extends ConsumerWidget {
                       noteTransactions: noteTransactions,
                       spendBreakdown: spendBreakdown,
                       currentWeekCheckIn: currentWeekCheckIn,
-                      totalExpense: _totalForType(weekTransactions, 'expense'),
-                      totalIncome: _totalForType(weekTransactions, 'income'),
+                      totalExpense: weeklyExpenseTotal,
+                      totalIncome: weeklyIncomeTotal,
                       onOpenCheckIn: openCurrentWeekCheckIn,
                     ),
-                    const SizedBox(height: 24),
-                    const _SectionIntro(
-                      eyebrow: 'Weekly check-in',
-                      title: 'One place to zoom out',
-                      subtitle:
-                          'Capture the meaning of the week once, instead of scattering it across multiple reflection tools.',
-                    ),
-                    const SizedBox(height: 10),
-                    _WeeklyCheckInCard(
-                      weekStart: weekStart,
-                      checkIn: currentWeekCheckIn,
-                      transactionCount: weekTransactions.length,
-                      noteCount: noteTransactions.length,
-                      totalExpense: _totalForType(weekTransactions, 'expense'),
-                      onOpen: openCurrentWeekCheckIn,
-                    ),
-                    const SizedBox(height: 24),
-                    const _SectionIntro(
-                      eyebrow: 'Money story',
-                      title: 'A slower monthly journal',
-                      subtitle:
-                          'One prompt each month to explore the history, fear, freedom, and meaning behind money itself.',
-                    ),
-                    const SizedBox(height: 10),
-                    _MoneyStoryCard(
-                      monthStart: monthStart,
-                      currentMonthStory: currentMonthStory,
-                    ),
                     const SizedBox(height: 16),
-                    _PastMoneyStoriesCard(entries: pastMoneyStories),
-                    const SizedBox(height: 24),
-                    const _SectionIntro(
-                      eyebrow: 'Evidence',
-                      title: 'Spending Notes From This Week',
-                      subtitle:
-                          'Short notes saved during transactions become context for your weekly insight.',
+                    _ReflectionLibraryCard(
+                      noteTransactions: noteTransactions,
+                      pastCheckIns: pastCheckIns,
+                      pastMoneyStories: pastMoneyStories,
+                      legacyEntries: legacyEntries,
                     ),
-                    const SizedBox(height: 10),
-                    _SpendingNotesCard(noteTransactions: noteTransactions),
-                    const SizedBox(height: 24),
-                    const _SectionIntro(
-                      eyebrow: 'History',
-                      title: 'Past Check-Ins',
-                      subtitle:
-                          'Previous weekly check-ins stay easy to revisit without competing with the current week.',
-                    ),
-                    const SizedBox(height: 10),
-                    _PastCheckInsCard(entries: pastCheckIns),
-                    if (legacyEntries.isNotEmpty) ...[
-                      const SizedBox(height: 24),
-                      const _SectionIntro(
-                        eyebrow: 'Archive',
-                        title: 'Legacy Reflections',
-                        subtitle:
-                            'Older reflections are still available here, but they no longer drive the weekly flow.',
-                      ),
-                      const SizedBox(height: 10),
-                      _LegacyReflectionsCard(entries: legacyEntries),
-                    ],
                   ],
                 ),
               ),
@@ -243,35 +208,313 @@ class ReflectScreen extends ConsumerWidget {
   }
 }
 
-class _SectionIntro extends StatelessWidget {
-  const _SectionIntro({
-    required this.eyebrow,
-    required this.title,
-    required this.subtitle,
+class _ReflectMenuCard extends StatelessWidget {
+  const _ReflectMenuCard({
+    required this.weekStart,
+    required this.monthStart,
+    required this.hasWeeklyCheckIn,
+    required this.hasMonthStory,
+    required this.transactionCount,
+    required this.noteCount,
+    required this.totalExpense,
+    required this.onOpenCheckIn,
+    required this.onOpenMoneyStory,
   });
 
-  final String eyebrow;
-  final String title;
-  final String subtitle;
+  final DateTime weekStart;
+  final DateTime monthStart;
+  final bool hasWeeklyCheckIn;
+  final bool hasMonthStory;
+  final int transactionCount;
+  final int noteCount;
+  final int totalExpense;
+  final VoidCallback onOpenCheckIn;
+  final VoidCallback onOpenMoneyStory;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
+    final weekLabel = AppDateUtils.formatWeekRange(weekStart);
+    final activityLabel = [
+      '$transactionCount session${transactionCount == 1 ? '' : 's'}',
+      '$noteCount note${noteCount == 1 ? '' : 's'}',
+      if (totalExpense > 0) CurrencyUtils.format(totalExpense),
+    ].join(' • ');
+
+    return TideCard(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          TideEyebrow(label: eyebrow),
-          const SizedBox(height: 6),
-          Text(title, style: Theme.of(context).textTheme.headlineSmall),
-          const SizedBox(height: 4),
-          Text(
-            subtitle,
-            style: Theme.of(
-              context,
-            ).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
+          Row(
+            children: [
+              TideSurfaceIcon(
+                icon: Icons.explore_outlined,
+                color: AppColors.primary,
+                backgroundColor: AppColors.primary.withValues(alpha: 0.10),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Start here',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      'Week of $weekLabel',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          _ReflectActionRow(
+            icon: hasWeeklyCheckIn
+                ? Icons.check_circle_rounded
+                : Icons.edit_note_rounded,
+            title: hasWeeklyCheckIn
+                ? 'Edit weekly check-in'
+                : 'Start weekly check-in',
+            subtitle: activityLabel,
+            primary: true,
+            onTap: onOpenCheckIn,
+          ),
+          const SizedBox(height: 8),
+          _ReflectActionRow(
+            icon: Icons.auto_stories_outlined,
+            title: hasMonthStory
+                ? 'Continue monthly money story'
+                : 'Open monthly money story',
+            subtitle: AppDateUtils.formatMonthDisplay(monthStart),
+            onTap: onOpenMoneyStory,
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _ReflectActionRow extends StatelessWidget {
+  const _ReflectActionRow({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+    this.primary = false,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+  final bool primary;
+
+  @override
+  Widget build(BuildContext context) {
+    final foreground = primary ? AppColors.primary : AppColors.textPrimary;
+    final background = primary
+        ? AppColors.primary.withValues(alpha: 0.10)
+        : AppColors.surface;
+    final border = primary
+        ? AppColors.primary.withValues(alpha: 0.22)
+        : AppColors.divider;
+
+    return Material(
+      color: background,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: border),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: primary
+                      ? AppColors.primary.withValues(alpha: 0.14)
+                      : AppColors.paperDim.withValues(alpha: 0.65),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(icon, size: 19, color: foreground),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        color: foreground,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      subtitle,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 10),
+              Icon(
+                Icons.chevron_right_rounded,
+                color: primary ? AppColors.primary : AppColors.textSecondary,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ReflectionLibraryCard extends StatelessWidget {
+  const _ReflectionLibraryCard({
+    required this.noteTransactions,
+    required this.pastCheckIns,
+    required this.pastMoneyStories,
+    required this.legacyEntries,
+  });
+
+  final List<TransactionModel> noteTransactions;
+  final List<JournalEntryModel> pastCheckIns;
+  final List<JournalEntryModel> pastMoneyStories;
+  final List<JournalEntryModel> legacyEntries;
+
+  @override
+  Widget build(BuildContext context) {
+    return TideCard(
+      padding: EdgeInsets.zero,
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(18, 16, 18, 8),
+            child: Row(
+              children: [
+                const TideSurfaceIcon(
+                  icon: Icons.folder_open_outlined,
+                  color: AppColors.textSoft,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Reference',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        'Notes and past entries',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          _LibrarySection(
+            icon: Icons.sticky_note_2_outlined,
+            iconColor: AppColors.secondaryDeep,
+            title: 'Spending notes',
+            subtitle: '${noteTransactions.length} from this week',
+            child: _SpendingNotesCard(
+              noteTransactions: noteTransactions,
+              framed: false,
+            ),
+          ),
+          _LibrarySection(
+            icon: Icons.menu_book_rounded,
+            iconColor: AppColors.primary,
+            title: 'Past check-ins',
+            subtitle: '${pastCheckIns.length} saved',
+            child: _PastCheckInsCard(entries: pastCheckIns, framed: false),
+          ),
+          _LibrarySection(
+            icon: Icons.history_edu_outlined,
+            iconColor: AppColors.secondaryDeep,
+            title: 'Monthly stories',
+            subtitle: '${pastMoneyStories.length} archived',
+            child: _PastMoneyStoriesCard(
+              entries: pastMoneyStories,
+              framed: false,
+            ),
+          ),
+          if (legacyEntries.isNotEmpty)
+            _LibrarySection(
+              icon: Icons.inventory_2_outlined,
+              iconColor: AppColors.textSoft,
+              title: 'Legacy reflections',
+              subtitle: '${legacyEntries.length} older entries',
+              child: _LegacyReflectionsCard(
+                entries: legacyEntries,
+                framed: false,
+              ),
+            ),
+          const SizedBox(height: 6),
+        ],
+      ),
+    );
+  }
+}
+
+class _LibrarySection extends StatelessWidget {
+  const _LibrarySection({
+    required this.icon,
+    required this.iconColor,
+    required this.title,
+    required this.subtitle,
+    required this.child,
+  });
+
+  final IconData icon;
+  final Color iconColor;
+  final String title;
+  final String subtitle;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Theme(
+      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+      child: ExpansionTile(
+        tilePadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 2),
+        childrenPadding: const EdgeInsets.fromLTRB(18, 0, 18, 16),
+        leading: TideSurfaceIcon(
+          icon: icon,
+          color: iconColor,
+          backgroundColor: iconColor.withValues(alpha: 0.10),
+          size: 16,
+        ),
+        title: Text(title, style: Theme.of(context).textTheme.titleSmall),
+        subtitle: Text(
+          subtitle,
+          style: Theme.of(
+            context,
+          ).textTheme.bodySmall?.copyWith(color: AppColors.textSecondary),
+        ),
+        children: [child],
       ),
     );
   }
@@ -616,616 +859,385 @@ class _ThisWeekInsightCardState extends State<_ThisWeekInsightCard> {
   }
 }
 
-class _WeeklyCheckInCard extends StatelessWidget {
-  const _WeeklyCheckInCard({
-    required this.weekStart,
-    required this.checkIn,
-    required this.transactionCount,
-    required this.noteCount,
-    required this.totalExpense,
-    required this.onOpen,
-  });
-
-  final DateTime weekStart;
-  final JournalEntryModel? checkIn;
-  final int transactionCount;
-  final int noteCount;
-  final int totalExpense;
-  final VoidCallback onOpen;
-
-  @override
-  Widget build(BuildContext context) {
-    final hasCheckIn = checkIn?.content.trim().isNotEmpty ?? false;
-
-    return TideCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TideSurfaceIcon(
-                icon: Icons.edit_note_rounded,
-                color: AppColors.secondaryDeep,
-                backgroundColor: AppColors.secondary.withValues(alpha: 0.16),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Weekly Check-In',
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      hasCheckIn
-                          ? 'Your one longer note for the week.'
-                          : 'Pause once this week to name what felt true about your spending, energy, and attention.',
-                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: AppColors.textSecondary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              TidePill(
-                label: 'Week of ${AppDateUtils.formatWeekRange(weekStart)}',
-                color: AppColors.textPrimary,
-                backgroundColor: AppColors.surface,
-              ),
-              TidePill(
-                label:
-                    '$transactionCount session${transactionCount == 1 ? '' : 's'}',
-                color: AppColors.textPrimary,
-                backgroundColor: AppColors.surface,
-              ),
-              TidePill(
-                label: '$noteCount note${noteCount == 1 ? '' : 's'} ready',
-                color: AppColors.textPrimary,
-                backgroundColor: AppColors.surface,
-              ),
-              if (totalExpense > 0)
-                TidePill(
-                  label: CurrencyUtils.format(totalExpense),
-                  color: AppColors.textPrimary,
-                  backgroundColor: AppColors.surface,
-                ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          if (hasCheckIn) ...[
-            Text(
-              _excerpt(checkIn!.content, maxChars: 240),
-              style: Theme.of(
-                context,
-              ).textTheme.bodyLarge?.copyWith(height: 1.7),
-            ),
-            if (checkIn!.mood != null) ...[
-              const SizedBox(height: 12),
-              TidePill(
-                label: _moodLabel(checkIn!.mood),
-                color: AppColors.primary,
-                backgroundColor: AppColors.primary.withValues(alpha: 0.10),
-              ),
-            ],
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: onOpen,
-              child: const Text('Edit weekly check-in'),
-            ),
-          ] else ...[
-            Text(
-              'Use this space for the bigger story: what surprised you, where your energy leaked, and what felt aligned. Spending notes saved during the week will support the insight above, but this is where you make sense of it.',
-              style: Theme.of(
-                context,
-              ).textTheme.bodyLarge?.copyWith(height: 1.7),
-            ),
-            const SizedBox(height: 14),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: AppColors.divider),
-              ),
-              child: Text(
-                'Helpful prompt: What part of this week felt most aligned with what matters to you, and what felt off?',
-                style: Theme.of(
-                  context,
-                ).textTheme.bodyMedium?.copyWith(color: AppColors.textSoft),
-              ),
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: onOpen,
-              child: const Text('Start weekly check-in'),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-class _MoneyStoryCard extends StatelessWidget {
-  const _MoneyStoryCard({
-    required this.monthStart,
-    required this.currentMonthStory,
-  });
-
-  final DateTime monthStart;
-  final JournalEntryModel? currentMonthStory;
-
-  @override
-  Widget build(BuildContext context) {
-    final prompt = MindfulnessContent.promptForMonth(monthStart);
-    final hasStory = currentMonthStory?.content.trim().isNotEmpty ?? false;
-
-    return TideCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              TideSurfaceIcon(
-                icon: Icons.auto_stories_outlined,
-                color: AppColors.primary,
-                backgroundColor: AppColors.primary.withValues(alpha: 0.12),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      AppDateUtils.formatMonthDisplay(monthStart),
-                      style: Theme.of(context).textTheme.titleLarge,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      prompt.prompt,
-                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                        height: 1.6,
-                        color: AppColors.textSoft,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          if (hasStory) ...[
-            Text(
-              _excerpt(currentMonthStory!.content, maxChars: 240),
-              style: Theme.of(
-                context,
-              ).textTheme.bodyLarge?.copyWith(height: 1.7),
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: () =>
-                  context.push('/reflect/money-story/${currentMonthStory!.id}'),
-              child: const Text('Continue this month’s story'),
-            ),
-          ] else ...[
-            Text(
-              'This space moves more slowly than the weekly check-in. Use it to notice the older stories that still shape your spending today.',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: AppColors.textSecondary,
-                height: 1.6,
-              ),
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: () => context.push('/reflect/money-story'),
-              child: const Text('Open monthly prompt'),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
 class _PastMoneyStoriesCard extends StatelessWidget {
-  const _PastMoneyStoriesCard({required this.entries});
+  const _PastMoneyStoriesCard({required this.entries, this.framed = true});
 
   final List<JournalEntryModel> entries;
+  final bool framed;
 
   @override
   Widget build(BuildContext context) {
     if (entries.isEmpty) {
-      return TideCard(
-        child: Text(
-          'Past monthly story entries will gather here, building a quieter archive of how your relationship with money changes over time.',
-          style: Theme.of(
-            context,
-          ).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
-        ),
+      final child = Text(
+        'Past monthly story entries will gather here, building a quieter archive of how your relationship with money changes over time.',
+        style: Theme.of(
+          context,
+        ).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
       );
+      return framed ? TideCard(child: child) : child;
     }
 
-    return TideCard(
-      padding: EdgeInsets.zero,
-      child: Column(
-        children: List.generate(entries.length, (index) {
-          final entry = entries[index];
-          final month =
-              entry.periodStart ?? AppDateUtils.startOfMonth(entry.date);
+    final child = Column(
+      children: List.generate(entries.length, (index) {
+        final entry = entries[index];
+        final month =
+            entry.periodStart ?? AppDateUtils.startOfMonth(entry.date);
 
-          return Column(
-            children: [
-              Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(22),
-                  onTap: () => context.push('/reflect/money-story/${entry.id}'),
-                  child: Padding(
-                    padding: const EdgeInsets.all(18),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const TideSurfaceIcon(
-                          icon: Icons.history_edu_outlined,
-                          color: AppColors.secondaryDeep,
+        return Column(
+          children: [
+            Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(22),
+                onTap: () => context.push('/reflect/money-story/${entry.id}'),
+                child: Padding(
+                  padding: EdgeInsets.all(framed ? 18 : 12),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const TideSurfaceIcon(
+                        icon: Icons.history_edu_outlined,
+                        color: AppColors.secondaryDeep,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              AppDateUtils.formatMonthDisplay(month),
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              _excerpt(entry.content),
+                              style: Theme.of(context).textTheme.bodyMedium
+                                  ?.copyWith(
+                                    color: AppColors.textSoft,
+                                    height: 1.6,
+                                  ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                AppDateUtils.formatMonthDisplay(month),
-                                style: Theme.of(context).textTheme.titleMedium,
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                _excerpt(entry.content),
-                                style: Theme.of(context).textTheme.bodyMedium
-                                    ?.copyWith(
-                                      color: AppColors.textSoft,
-                                      height: 1.6,
-                                    ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        const Icon(
-                          Icons.chevron_right_rounded,
-                          color: AppColors.textSecondary,
-                        ),
-                      ],
-                    ),
+                      ),
+                      const SizedBox(width: 12),
+                      const Icon(
+                        Icons.chevron_right_rounded,
+                        color: AppColors.textSecondary,
+                      ),
+                    ],
                   ),
                 ),
               ),
-              if (index != entries.length - 1)
-                Divider(
-                  height: 1,
-                  color: AppColors.divider.withValues(alpha: 0.8),
-                ),
-            ],
-          );
-        }),
-      ),
+            ),
+            if (index != entries.length - 1)
+              Divider(
+                height: 1,
+                color: AppColors.divider.withValues(alpha: 0.8),
+              ),
+          ],
+        );
+      }),
     );
+    return framed ? TideCard(padding: EdgeInsets.zero, child: child) : child;
   }
 }
 
 class _SpendingNotesCard extends StatelessWidget {
-  const _SpendingNotesCard({required this.noteTransactions});
+  const _SpendingNotesCard({
+    required this.noteTransactions,
+    this.framed = true,
+  });
 
   final List<TransactionModel> noteTransactions;
+  final bool framed;
 
   @override
   Widget build(BuildContext context) {
     if (noteTransactions.isEmpty) {
-      return TideCard(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'No spending notes yet this week.',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'When you save a session, add one short note about what that spending meant. That note will show up here and feed your weekly insight.',
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
-            ),
-          ],
-        ),
+      final child = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'No spending notes yet this week.',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'When you save a session, add one short note about what that spending meant. That note will show up here and feed your weekly insight.',
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
+          ),
+        ],
       );
+      return framed ? TideCard(child: child) : child;
     }
 
-    return TideCard(
-      padding: EdgeInsets.zero,
-      child: Column(
-        children: List.generate(noteTransactions.length, (index) {
-          final transaction = noteTransactions[index];
-          return Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(18),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    TideSurfaceIcon(
-                      icon: transaction.isExpense
-                          ? Icons.arrow_upward_rounded
-                          : Icons.arrow_downward_rounded,
-                      color: transaction.isExpense
-                          ? AppColors.expense
-                          : AppColors.income,
-                      backgroundColor: transaction.isExpense
-                          ? AppColors.expense.withValues(alpha: 0.12)
-                          : AppColors.income.withValues(alpha: 0.12),
+    final child = Column(
+      children: List.generate(noteTransactions.length, (index) {
+        final transaction = noteTransactions[index];
+        return Column(
+          children: [
+            Padding(
+              padding: EdgeInsets.all(framed ? 18 : 12),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TideSurfaceIcon(
+                    icon: transaction.isExpense
+                        ? Icons.arrow_upward_rounded
+                        : Icons.arrow_downward_rounded,
+                    color: transaction.isExpense
+                        ? AppColors.expense
+                        : AppColors.income,
+                    backgroundColor: transaction.isExpense
+                        ? AppColors.expense.withValues(alpha: 0.12)
+                        : AppColors.income.withValues(alpha: 0.12),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                transaction.displayTitle.isEmpty
+                                    ? 'Session note'
+                                    : transaction.displayTitle,
+                                style: Theme.of(context).textTheme.titleMedium,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              CurrencyUtils.format(transaction.totalAmount),
+                              style: Theme.of(context).textTheme.labelLarge
+                                  ?.copyWith(
+                                    color: transaction.isExpense
+                                        ? AppColors.expense
+                                        : AppColors.income,
+                                  ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          transaction.notes!.trim(),
+                          style: Theme.of(
+                            context,
+                          ).textTheme.bodyLarge?.copyWith(height: 1.65),
+                        ),
+                        const SizedBox(height: 10),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            TidePill(
+                              label: AppDateUtils.formatDate(transaction.date),
+                              color: AppColors.textPrimary,
+                              backgroundColor: AppColors.surface,
+                            ),
+                            TidePill(
+                              label:
+                                  '${transaction.itemCount} item${transaction.itemCount == 1 ? '' : 's'}',
+                              color: AppColors.textPrimary,
+                              backgroundColor: AppColors.surface,
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Expanded(
-                                child: Text(
-                                  transaction.displayTitle.isEmpty
-                                      ? 'Session note'
-                                      : transaction.displayTitle,
-                                  style: Theme.of(
-                                    context,
-                                  ).textTheme.titleMedium,
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                CurrencyUtils.format(transaction.totalAmount),
-                                style: Theme.of(context).textTheme.labelLarge
-                                    ?.copyWith(
-                                      color: transaction.isExpense
-                                          ? AppColors.expense
-                                          : AppColors.income,
-                                    ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            transaction.notes!.trim(),
-                            style: Theme.of(
-                              context,
-                            ).textTheme.bodyLarge?.copyWith(height: 1.65),
-                          ),
-                          const SizedBox(height: 10),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: [
-                              TidePill(
-                                label: AppDateUtils.formatDate(
-                                  transaction.date,
-                                ),
-                                color: AppColors.textPrimary,
-                                backgroundColor: AppColors.surface,
-                              ),
-                              TidePill(
-                                label:
-                                    '${transaction.itemCount} item${transaction.itemCount == 1 ? '' : 's'}',
-                                color: AppColors.textPrimary,
-                                backgroundColor: AppColors.surface,
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-              if (index != noteTransactions.length - 1)
-                Divider(
-                  height: 1,
-                  color: AppColors.divider.withValues(alpha: 0.8),
-                ),
-            ],
-          );
-        }),
-      ),
+            ),
+            if (index != noteTransactions.length - 1)
+              Divider(
+                height: 1,
+                color: AppColors.divider.withValues(alpha: 0.8),
+              ),
+          ],
+        );
+      }),
     );
+    return framed ? TideCard(padding: EdgeInsets.zero, child: child) : child;
   }
 }
 
 class _PastCheckInsCard extends StatelessWidget {
-  const _PastCheckInsCard({required this.entries});
+  const _PastCheckInsCard({required this.entries, this.framed = true});
 
   final List<JournalEntryModel> entries;
+  final bool framed;
 
   @override
   Widget build(BuildContext context) {
     if (entries.isEmpty) {
-      return TideCard(
-        child: Text(
-          'No past check-ins yet. Once you finish a weekly check-in, it will stay here as a calm archive instead of mixing with the current week.',
-          style: Theme.of(
-            context,
-          ).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
-        ),
+      final child = Text(
+        'No past check-ins yet. Once you finish a weekly check-in, it will stay here as a calm archive instead of mixing with the current week.',
+        style: Theme.of(
+          context,
+        ).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
       );
+      return framed ? TideCard(child: child) : child;
     }
 
-    return TideCard(
-      padding: EdgeInsets.zero,
-      child: Column(
-        children: List.generate(entries.length, (index) {
-          final entry = entries[index];
-          final weekStart =
-              entry.periodStart ?? AppDateUtils.startOfWeek(entry.date);
+    final child = Column(
+      children: List.generate(entries.length, (index) {
+        final entry = entries[index];
+        final weekStart =
+            entry.periodStart ?? AppDateUtils.startOfWeek(entry.date);
 
-          return Column(
-            children: [
-              Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(22),
-                  onTap: () => context.push('/reflect/${entry.id}'),
-                  child: Padding(
-                    padding: const EdgeInsets.all(18),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const TideSurfaceIcon(
-                          icon: Icons.menu_book_rounded,
-                          color: AppColors.primary,
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Week of ${AppDateUtils.formatWeekRange(weekStart)}',
-                                style: Theme.of(context).textTheme.titleMedium,
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                _excerpt(entry.content),
-                                style: Theme.of(context).textTheme.bodyMedium
-                                    ?.copyWith(
-                                      color: AppColors.textSoft,
-                                      height: 1.6,
-                                    ),
-                              ),
-                              const SizedBox(height: 10),
-                              Wrap(
-                                spacing: 8,
-                                runSpacing: 8,
-                                children: [
-                                  if (entry.mood != null)
-                                    TidePill(
-                                      label: _moodLabel(entry.mood),
-                                      color: AppColors.primary,
-                                      backgroundColor: AppColors.primary
-                                          .withValues(alpha: 0.10),
-                                    ),
-                                  TidePill(
-                                    label: AppDateUtils.formatDate(entry.date),
-                                    color: AppColors.textPrimary,
-                                    backgroundColor: AppColors.surface,
+        return Column(
+          children: [
+            Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(22),
+                onTap: () => context.push('/reflect/${entry.id}'),
+                child: Padding(
+                  padding: EdgeInsets.all(framed ? 18 : 12),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const TideSurfaceIcon(
+                        icon: Icons.menu_book_rounded,
+                        color: AppColors.primary,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Week of ${AppDateUtils.formatWeekRange(weekStart)}',
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              _excerpt(entry.content),
+                              style: Theme.of(context).textTheme.bodyMedium
+                                  ?.copyWith(
+                                    color: AppColors.textSoft,
+                                    height: 1.6,
                                   ),
-                                ],
-                              ),
-                            ],
-                          ),
+                            ),
+                            const SizedBox(height: 10),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                if (entry.mood != null)
+                                  TidePill(
+                                    label: _moodLabel(entry.mood),
+                                    color: AppColors.primary,
+                                    backgroundColor: AppColors.primary
+                                        .withValues(alpha: 0.10),
+                                  ),
+                                TidePill(
+                                  label: AppDateUtils.formatDate(entry.date),
+                                  color: AppColors.textPrimary,
+                                  backgroundColor: AppColors.surface,
+                                ),
+                              ],
+                            ),
+                          ],
                         ),
-                        const SizedBox(width: 12),
-                        const Icon(
-                          Icons.chevron_right_rounded,
-                          color: AppColors.textSecondary,
-                        ),
-                      ],
-                    ),
+                      ),
+                      const SizedBox(width: 12),
+                      const Icon(
+                        Icons.chevron_right_rounded,
+                        color: AppColors.textSecondary,
+                      ),
+                    ],
                   ),
                 ),
               ),
-              if (index != entries.length - 1)
-                Divider(
-                  height: 1,
-                  color: AppColors.divider.withValues(alpha: 0.8),
-                ),
-            ],
-          );
-        }),
-      ),
+            ),
+            if (index != entries.length - 1)
+              Divider(
+                height: 1,
+                color: AppColors.divider.withValues(alpha: 0.8),
+              ),
+          ],
+        );
+      }),
     );
+    return framed ? TideCard(padding: EdgeInsets.zero, child: child) : child;
   }
 }
 
 class _LegacyReflectionsCard extends StatelessWidget {
-  const _LegacyReflectionsCard({required this.entries});
+  const _LegacyReflectionsCard({required this.entries, this.framed = true});
 
   final List<JournalEntryModel> entries;
+  final bool framed;
 
   @override
   Widget build(BuildContext context) {
-    return TideCard(
-      padding: EdgeInsets.zero,
-      child: Column(
-        children: List.generate(entries.length, (index) {
-          final entry = entries[index];
+    final child = Column(
+      children: List.generate(entries.length, (index) {
+        final entry = entries[index];
 
-          return Column(
-            children: [
-              Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(22),
-                  onTap: () => context.push('/reflect/${entry.id}'),
-                  child: Padding(
-                    padding: const EdgeInsets.all(18),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const TideSurfaceIcon(
-                          icon: Icons.inventory_2_outlined,
-                          color: AppColors.textSoft,
+        return Column(
+          children: [
+            Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(22),
+                onTap: () => context.push('/reflect/${entry.id}'),
+                child: Padding(
+                  padding: EdgeInsets.all(framed ? 18 : 12),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const TideSurfaceIcon(
+                        icon: Icons.inventory_2_outlined,
+                        color: AppColors.textSoft,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              AppDateUtils.formatDate(entry.date),
+                              style: Theme.of(context).textTheme.titleMedium,
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              _excerpt(entry.content),
+                              style: Theme.of(context).textTheme.bodyMedium
+                                  ?.copyWith(
+                                    color: AppColors.textSoft,
+                                    height: 1.6,
+                                  ),
+                            ),
+                          ],
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                AppDateUtils.formatDate(entry.date),
-                                style: Theme.of(context).textTheme.titleMedium,
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                _excerpt(entry.content),
-                                style: Theme.of(context).textTheme.bodyMedium
-                                    ?.copyWith(
-                                      color: AppColors.textSoft,
-                                      height: 1.6,
-                                    ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        const Icon(
-                          Icons.chevron_right_rounded,
-                          color: AppColors.textSecondary,
-                        ),
-                      ],
-                    ),
+                      ),
+                      const SizedBox(width: 12),
+                      const Icon(
+                        Icons.chevron_right_rounded,
+                        color: AppColors.textSecondary,
+                      ),
+                    ],
                   ),
                 ),
               ),
-              if (index != entries.length - 1)
-                Divider(
-                  height: 1,
-                  color: AppColors.divider.withValues(alpha: 0.8),
-                ),
-            ],
-          );
-        }),
-      ),
+            ),
+            if (index != entries.length - 1)
+              Divider(
+                height: 1,
+                color: AppColors.divider.withValues(alpha: 0.8),
+              ),
+          ],
+        );
+      }),
     );
+    return framed ? TideCard(padding: EdgeInsets.zero, child: child) : child;
   }
 }
 
