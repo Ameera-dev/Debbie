@@ -8,6 +8,7 @@ class Tables {
   static const transactionItems = 'transaction_items';
   static const journal = 'journal';
   static const dailyIntentions = 'daily_intentions';
+  static const weeklyBudgetPlans = 'weekly_budget_plans';
   static const settings = 'settings';
 
   static const createUserValues =
@@ -61,6 +62,9 @@ class Tables {
       image_path TEXT,
       pending_until TEXT,
       emotion TEXT,
+      latitude REAL,
+      longitude REAL,
+      location_label TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
   ''';
@@ -105,6 +109,19 @@ class Tables {
     )
   ''';
 
+  static const createWeeklyBudgetPlans =
+      '''
+    CREATE TABLE $weeklyBudgetPlans (
+      id TEXT PRIMARY KEY,
+      plan_date TEXT NOT NULL UNIQUE,
+      planned_amount INTEGER NOT NULL,
+      actual_amount INTEGER,
+      notes TEXT,
+      actualized_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  ''';
+
   static const createSettings =
       '''
     CREATE TABLE $settings (
@@ -127,16 +144,66 @@ class Tables {
     )
   ''';
 
+  static const transactionImages = 'transaction_images';
+
+  static const createTransactionImages =
+      '''
+    CREATE TABLE $transactionImages (
+      id TEXT PRIMARY KEY,
+      transaction_id TEXT NOT NULL REFERENCES $transactions(id) ON DELETE CASCADE,
+      image_path TEXT NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  ''';
+
+  static const recurringExpenses = 'recurring_expenses';
+
+  static const createRecurringExpenses =
+      '''
+    CREATE TABLE $recurringExpenses (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      amount INTEGER NOT NULL,
+      category TEXT,
+      notes TEXT,
+      value_id TEXT REFERENCES $userValues(id) ON DELETE SET NULL,
+      goal_id TEXT REFERENCES $goals(id) ON DELETE SET NULL,
+      due_day INTEGER,
+      pay_type TEXT NOT NULL DEFAULT 'manual',
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    )
+  ''';
+
+  static const recurringExpensePayments = 'recurring_expense_payments';
+
+  static const createRecurringExpensePayments =
+      '''
+    CREATE TABLE $recurringExpensePayments (
+      id TEXT PRIMARY KEY,
+      recurring_expense_id TEXT NOT NULL REFERENCES $recurringExpenses(id) ON DELETE CASCADE,
+      month TEXT NOT NULL,
+      transaction_id TEXT REFERENCES $transactions(id) ON DELETE SET NULL,
+      paid_at TEXT NOT NULL,
+      UNIQUE(recurring_expense_id, month)
+    )
+  ''';
+
   static const allCreateStatements = [
     createUserValues,
     createValuesPlan,
     createGoals,
     createTransactions,
     createTransactionItems,
+    createTransactionImages,
     createJournal,
     createDailyIntentions,
+    createWeeklyBudgetPlans,
     createSettings,
     createAiReflections,
+    createRecurringExpenses,
+    createRecurringExpensePayments,
   ];
 }
 

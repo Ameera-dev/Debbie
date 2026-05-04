@@ -38,6 +38,7 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
   bool _showSearch = false;
   bool _showCalendar = false;
   final _searchController = TextEditingController();
+  TxRange _range = TxRange.month; // default to current month view
 
   // Calendar state
   CalendarFormat _calendarFormat = CalendarFormat.month;
@@ -59,7 +60,7 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        toolbarHeight: _showSearch ? 64 : 86,
+        toolbarHeight: _showSearch ? 56 : 72,
         titleSpacing: 16,
         title: _showSearch
             ? _SearchField(
@@ -81,9 +82,9 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
                   const TideEyebrow(label: 'History'),
                   const SizedBox(height: 2),
                   Text(
-                    'Every rupiah tells a story.',
+                    'Your money story',
                     style: GoogleFonts.lora(
-                      fontSize: 22,
+                      fontSize: 18,
                       fontWeight: FontWeight.w600,
                       height: 1.1,
                     ),
@@ -98,6 +99,7 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
                     ? Icons.calendar_month
                     : Icons.calendar_month_outlined,
                 color: _showCalendar ? AppColors.primary : null,
+                size: 20,
               ),
               onPressed: () {
                 setState(() {
@@ -110,11 +112,27 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
               },
             ),
             IconButton(
-              icon: const Icon(Icons.add),
-              onPressed: () => context.push('/add-session'),
+              icon: const Icon(Icons.repeat_rounded, size: 20),
+              tooltip: 'Monthly commitments',
+              onPressed: () => context.push('/recurring'),
             ),
+            const SizedBox(width: 4),
           ],
         ],
+        // Range selector docked as AppBar bottom strip
+        bottom: _showSearch
+            ? null
+            : PreferredSize(
+                preferredSize: const Size.fromHeight(44),
+                child: _RangeSelector(
+                  selected: _range,
+                  onChanged: (r) => setState(() {
+                    _range = r;
+                    _selectedDay = null;
+                    _filters = _filters.copyWith(clearSelectedDay: true);
+                  }),
+                ),
+              ),
       ),
       body: TidePageBackground(
         child: Column(
@@ -152,9 +170,9 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
                 error: (_, __) => const SizedBox.shrink(),
               ),
 
-            // ── Filter bar ───────────────────────────────────────────
+            // ── Filter bar (single row) ──────────────────────────────
             Padding(
-              padding: const EdgeInsets.only(top: 4, bottom: 8),
+              padding: const EdgeInsets.fromLTRB(0, 6, 0, 4),
               child: FilterBar(
                 filters: _filters,
                 values: values,
@@ -180,10 +198,10 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
                     );
                   }
 
-                  // Group by date label
+                  // Group by range-aware label (preserves insertion order)
                   final grouped = <String, List<TransactionModel>>{};
                   for (final tx in filtered) {
-                    final label = AppDateUtils.groupLabel(tx.date);
+                    final label = AppDateUtils.groupLabelForRange(tx.date, _range);
                     grouped.putIfAbsent(label, () => []).add(tx);
                   }
                   final groups = grouped.entries.toList();
@@ -194,7 +212,7 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
                       if (pending.isNotEmpty)
                         _PendingTransactionsSection(transactions: pending),
                       if (filtered.isNotEmpty) ...[
-                        _MonthlySummary(transactions: filtered),
+                        _RangeSummary(transactions: filtered, range: _range),
                         ...groups.map((group) {
                           return _DateGroup(
                             label: group.key,
@@ -221,25 +239,38 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
   List<TransactionModel> _applyFilters(List<TransactionModel> transactions) {
     var result = transactions;
 
+    // Custom date range takes full control — skip range selector when active
+    if (_filters.dateFilter == DateFilter.custom &&
+        _filters.customFrom != null) {
+      final from = _filters.customFrom!;
+      final to = _filters.customTo ?? DateTime.now();
+      result = result
+          .where((tx) => !tx.date.isBefore(from) && !tx.date.isAfter(to))
+          .toList();
+    } else {
+      // Range selector filter (Today / Week / Month / etc.)
+      final (rangeFrom, rangeTo) = AppDateUtils.rangeFor(_range);
+      result = result
+          .where(
+            (tx) => !tx.date.isBefore(rangeFrom) && !tx.date.isAfter(rangeTo),
+          )
+          .toList();
+
+      // Calendar day tap
+      if (_filters.selectedDay != null) {
+        final d = _filters.selectedDay!;
+        final start = DateTime(d.year, d.month, d.day);
+        final end = DateTime(d.year, d.month, d.day, 23, 59, 59);
+        result = result
+            .where((tx) => !tx.date.isBefore(start) && !tx.date.isAfter(end))
+            .toList();
+      }
+    }
+
     // Type filter
     final typeStr = _filters.typeString;
     if (typeStr != null) {
       result = result.where((tx) => tx.type == typeStr).toList();
-    }
-
-    // Date filter
-    final (from, to) = _filters.dateRange;
-    if (from != null) {
-      result = result
-          .where(
-            (tx) =>
-                !tx.date.isBefore(DateTime(from.year, from.month, from.day)),
-          )
-          .toList();
-    }
-    if (to != null) {
-      final toEnd = DateTime(to.year, to.month, to.day, 23, 59, 59);
-      result = result.where((tx) => !tx.date.isAfter(toEnd)).toList();
     }
 
     // Value filter
@@ -547,10 +578,25 @@ class _SearchField extends StatelessWidget {
 // Monthly summary card — redesigned with visual bar
 // ---------------------------------------------------------------------------
 
-class _MonthlySummary extends StatelessWidget {
-  const _MonthlySummary({required this.transactions});
+class _RangeSummary extends StatelessWidget {
+  const _RangeSummary({required this.transactions, required this.range});
 
   final List<TransactionModel> transactions;
+  final TxRange range;
+
+  String get _rangeLabel {
+    final now = DateTime.now();
+    return switch (range) {
+      TxRange.today => 'Today',
+      TxRange.week => 'This week',
+      TxRange.month => DateFormat('MMMM yyyy').format(now),
+      TxRange.threeMonths => 'Last 3 months',
+      TxRange.sixMonths => 'Last 6 months',
+      TxRange.oneYear => 'Last 12 months',
+      TxRange.threeYears => 'Last 3 years',
+      TxRange.fiveYears => 'Last 5 years',
+    };
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -566,32 +612,48 @@ class _MonthlySummary extends StatelessWidget {
     final balance = totalIncome - totalExpense;
     final total = totalIncome + totalExpense;
     final incomeRatio = total > 0 ? totalIncome / total : 0.5;
+    final isPositive = balance >= 0;
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
       child: TideCard(
-        padding: const EdgeInsets.all(18),
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
         child: Column(
           children: [
+            // Header: label left, net right
             Row(
               children: [
-                const TideEyebrow(label: 'Month to date'),
+                TideEyebrow(label: _rangeLabel),
                 const Spacer(),
-                Text(
-                  DateFormat('MMMM').format(DateTime.now()),
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: AppColors.textSecondary,
-                    fontWeight: FontWeight.w700,
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    color: (isPositive ? AppColors.income : AppColors.expense)
+                        .withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    '${isPositive ? '+' : '-'}${CurrencyUtils.format(balance.abs())}',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontFamily: 'JetBrains Mono',
+                      fontWeight: FontWeight.w700,
+                      color: isPositive ? AppColors.income : AppColors.expense,
+                    ),
                   ),
                 ),
               ],
             ),
-            const SizedBox(height: 14),
-            // Income vs Expense visual bar
+            const SizedBox(height: 10),
+
+            // Income vs expense bar
             ClipRRect(
-              borderRadius: BorderRadius.circular(4),
+              borderRadius: BorderRadius.circular(6),
               child: SizedBox(
-                height: 6,
+                height: 5,
                 child: Row(
                   children: [
                     Flexible(
@@ -606,34 +668,31 @@ class _MonthlySummary extends StatelessWidget {
                 ),
               ),
             ),
-            const SizedBox(height: 14),
+            const SizedBox(height: 12),
 
-            // Numbers row
+            // Three stats
             Row(
               children: [
                 _SummaryItem(
-                  label: 'Income',
+                  label: 'In',
                   amount: totalIncome,
                   color: AppColors.income,
                   prefix: '+',
                 ),
-                const SizedBox(width: 16),
-                Container(width: 1, height: 32, color: AppColors.divider),
-                const SizedBox(width: 16),
+                Container(width: 1, height: 28, color: AppColors.divider),
                 _SummaryItem(
-                  label: 'Expenses',
+                  label: 'Out',
                   amount: totalExpense,
                   color: AppColors.expense,
                   prefix: '-',
                 ),
-                const SizedBox(width: 16),
-                Container(width: 1, height: 32, color: AppColors.divider),
-                const SizedBox(width: 16),
+                Container(width: 1, height: 28, color: AppColors.divider),
                 _SummaryItem(
-                  label: 'Balance',
-                  amount: balance.abs(),
-                  color: balance >= 0 ? AppColors.income : AppColors.expense,
-                  prefix: balance >= 0 ? '+' : '-',
+                  label: 'Txns',
+                  amount: transactions.length,
+                  color: AppColors.textSecondary,
+                  prefix: '',
+                  isCount: true,
                 ),
               ],
             ),
@@ -745,12 +804,9 @@ class _PendingTransactionsSection extends ConsumerWidget {
                       Expanded(
                         child: OutlinedButton(
                           onPressed: () async {
-                            final imagePath = transaction.imagePath;
-                            if (imagePath != null) {
-                              await ref
-                                  .read(imageServiceProvider)
-                                  .delete(imagePath);
-                            }
+                            await ref
+                                .read(imageServiceProvider)
+                                .deleteAll(transaction.images);
                             await ref
                                 .read(transactionsProvider.notifier)
                                 .discardPending(transaction.id);
@@ -789,50 +845,44 @@ class _SummaryItem extends StatelessWidget {
     required this.amount,
     required this.color,
     required this.prefix,
+    this.isCount = false,
   });
 
   final String label;
   final int amount;
   final Color color;
   final String prefix;
+  final bool isCount;
 
   @override
   Widget build(BuildContext context) {
+    final displayText = isCount ? '$amount' : '$prefix ${CurrencyUtils.format(amount)}';
     return Expanded(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 8,
-                height: 8,
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.7),
-                  borderRadius: BorderRadius.circular(2),
-                ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: AppColors.textSecondary,
+                fontSize: 10,
               ),
-              const SizedBox(width: 6),
-              Text(
-                label,
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: AppColors.textSecondary,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '$prefix ${CurrencyUtils.format(amount)}',
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              fontFamily: 'JetBrains Mono',
-              fontWeight: FontWeight.w600,
-              color: color,
             ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-        ],
+            const SizedBox(height: 3),
+            Text(
+              displayText,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                fontFamily: 'JetBrains Mono',
+                fontWeight: FontWeight.w700,
+                color: color,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -890,26 +940,35 @@ class _DateGroup extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 12),
-              // Daily totals
-              if (dailyExpense > 0)
-                Text(
-                  '-${CurrencyUtils.format(dailyExpense)}',
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    fontFamily: 'JetBrains Mono',
-                    color: AppColors.expense.withValues(alpha: 0.7),
-                    fontSize: 11,
-                  ),
-                ),
-              if (dailyIncome > 0 && dailyExpense > 0) const SizedBox(width: 8),
-              if (dailyIncome > 0)
-                Text(
-                  '+${CurrencyUtils.format(dailyIncome)}',
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    fontFamily: 'JetBrains Mono',
-                    color: AppColors.income.withValues(alpha: 0.7),
-                    fontSize: 11,
-                  ),
-                ),
+              // Net for this group as a compact pill
+              if (dailyExpense > 0 || dailyIncome > 0)
+                Builder(builder: (context) {
+                  final net = dailyIncome - dailyExpense;
+                  final isPositive = net >= 0;
+                  final color = isPositive ? AppColors.income : AppColors.expense;
+                  final label = isPositive
+                      ? '+${CurrencyUtils.format(net)}'
+                      : '-${CurrencyUtils.format(net.abs())}';
+                  return Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 7,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: 0.10),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      label,
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontFamily: 'JetBrains Mono',
+                        fontWeight: FontWeight.w700,
+                        color: color.withValues(alpha: 0.85),
+                      ),
+                    ),
+                  );
+                }),
             ],
           ),
         ),
@@ -981,10 +1040,7 @@ class _DismissibleTile extends StatelessWidget {
       direction: DismissDirection.endToStart,
       confirmDismiss: (_) => _confirmDelete(context),
       onDismissed: (_) async {
-        final imagePath = transaction.imagePath;
-        if (imagePath != null) {
-          await ref.read(imageServiceProvider).delete(imagePath);
-        }
+        await ref.read(imageServiceProvider).deleteAll(transaction.images);
         await ref.read(transactionsProvider.notifier).remove(transaction.id);
       },
       background: Container(
@@ -1195,17 +1251,53 @@ class _TransactionTile extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
 
-                // Amount
-                Text(
-                  CurrencyUtils.formatSigned(
-                    tx.totalAmount,
-                    isExpense: isExpense,
-                  ),
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    color: amountColor,
-                    fontFamily: 'JetBrains Mono',
-                    fontWeight: FontWeight.w700,
-                  ),
+                // Amount + time + photo badge column
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      CurrencyUtils.formatSigned(
+                        tx.totalAmount,
+                        isExpense: isExpense,
+                      ),
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        color: amountColor,
+                        fontFamily: 'JetBrains Mono',
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (tx.hasImages) ...[
+                          Icon(
+                            Icons.photo_camera_outlined,
+                            size: 10,
+                            color: AppColors.textSecondary.withValues(alpha: 0.6),
+                          ),
+                          const SizedBox(width: 2),
+                          Text(
+                            '${tx.images.length}',
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textSecondary.withValues(alpha: 0.6),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                        ],
+                        Text(
+                          AppDateUtils.formatTime(tx.date),
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontFamily: 'JetBrains Mono',
+                            color: AppColors.textSecondary.withValues(alpha: 0.55),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -1283,6 +1375,92 @@ class _ImageThumbnailState extends ConsumerState<_ImageThumbnail> {
           ),
           body: PhotoView(imageProvider: FileImage(_file!)),
         ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Range selector — horizontal chip strip
+// ---------------------------------------------------------------------------
+
+class _RangeSelector extends StatelessWidget {
+  const _RangeSelector({required this.selected, required this.onChanged});
+
+  final TxRange selected;
+  final ValueChanged<TxRange> onChanged;
+
+  static const _chipHeight = 32.0;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return SizedBox(
+      height: 44,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        // No vertical padding — chips are centered inside the 44px SizedBox
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        itemCount: TxRange.values.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 6),
+        itemBuilder: (context, i) {
+          final range = TxRange.values[i];
+          final isSelected = range == selected;
+          return Center(
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              curve: Curves.easeOutCubic,
+              height: _chipHeight,
+              decoration: BoxDecoration(
+                color: isSelected
+                    ? AppColors.primary
+                    : (isDark ? AppColors.darkSurface : AppColors.background),
+                borderRadius: BorderRadius.circular(_chipHeight / 2),
+                border: isSelected
+                    ? null
+                    : Border.all(
+                        color: AppColors.divider.withValues(alpha: 0.8),
+                        width: 1,
+                      ),
+                boxShadow: isSelected
+                    ? [
+                        BoxShadow(
+                          color: AppColors.primary.withValues(alpha: 0.25),
+                          blurRadius: 8,
+                          offset: const Offset(0, 3),
+                        ),
+                      ]
+                    : null,
+              ),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(_chipHeight / 2),
+                onTap: () => onChanged(range),
+                child: SizedBox(
+                  height: _chipHeight,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    child: Center(
+                      child: Text(
+                        range.label,
+                        style: TextStyle(
+                          fontFamily: 'Nunito',
+                          fontSize: 12,
+                          fontWeight: isSelected
+                              ? FontWeight.w700
+                              : FontWeight.w500,
+                          color: isSelected
+                              ? Colors.white
+                              : AppColors.textSecondary,
+                          height: 1.0,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
       ),
     );
   }

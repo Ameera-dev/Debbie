@@ -19,11 +19,13 @@ import '../../../providers/transactions_provider.dart';
 import '../../../providers/values_provider.dart';
 import '../../../services/ai_reflection_service.dart';
 import '../../../services/image_service.dart';
+import '../../../services/location_service.dart';
 import '../../../services/suggestion_service.dart';
 import '../../../shared/constants/default_tags.dart';
 import '../../../shared/constants/mindfulness.dart';
 import '../../../shared/constants/strings.dart';
 import '../../../shared/utils/currency.dart';
+import '../../../shared/utils/date_utils.dart';
 import '../../../shared/utils/id_generator.dart';
 import '../../../shared/widgets/tide.dart';
 import '../widgets/tag_picker.dart';
@@ -74,14 +76,18 @@ class _AddSessionScreenState extends ConsumerState<AddSessionScreen> {
   final _scrollController = ScrollController();
   DateTime _date = DateTime.now();
   String _type = 'expense';
-  String? _imagePath; // relative path after compress+save
-  File? _imageFile; // local preview file
+  // Each entry: {path: relative path, file: resolved File}
+  final List<({String path, File file})> _images = [];
   bool _saving = false;
   bool _loading = true;
   String? _selectedEmotion;
 
   TransactionModel? _editTransaction;
   bool get _isEditing => _editTransaction != null;
+
+  // Location state
+  LocationData? _locationData;
+  bool _locationLoading = false;
 
   @override
   void initState() {
@@ -103,8 +109,34 @@ class _AddSessionScreenState extends ConsumerState<AddSessionScreen> {
       }
     } else {
       _addItem(scrollToBottom: false);
+      // Auto-capture location for new transactions (background, no blocking)
+      _captureLocation(silent: true);
     }
     if (mounted) setState(() => _loading = false);
+  }
+
+  Future<void> _captureLocation({bool silent = false}) async {
+    if (!silent) setState(() => _locationLoading = true);
+
+    final result = await ref.read(locationServiceProvider).getCurrentLocation();
+
+    if (!mounted) return;
+    setState(() {
+      _locationData = result.data;
+      _locationLoading = false;
+    });
+
+    if (!silent && result.failure != null) {
+      final msg = switch (result.failure!) {
+        LocationFailure.permissionDenied => 'Location permission is needed.',
+        LocationFailure.permissionPermanentlyDenied =>
+          'Location permission permanently denied. Enable it in Settings.',
+        LocationFailure.disabled => 'Location services are turned off.',
+        LocationFailure.timeout => 'Could not get location. Try again.',
+        LocationFailure.unknown => 'Could not get location.',
+      };
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    }
   }
 
   void _initFromExisting(TransactionModel tx) {
@@ -113,11 +145,17 @@ class _AddSessionScreenState extends ConsumerState<AddSessionScreen> {
     _selectedEmotion = tx.emotion;
     _titleController.text = tx.title ?? '';
     _notesController.text = tx.notes ?? '';
-    _imagePath = tx.imagePath;
-
-    if (tx.imagePath != null) {
-      _loadExistingImage(tx.imagePath!);
+    if (tx.latitude != null && tx.longitude != null) {
+      _locationData = LocationData(
+        latitude: tx.latitude!,
+        longitude: tx.longitude!,
+        label:
+            tx.locationLabel ??
+            '${tx.latitude!.toStringAsFixed(4)}, ${tx.longitude!.toStringAsFixed(4)}',
+      );
     }
+
+    _loadExistingImages(tx.images);
 
     for (final item in tx.items) {
       final draft = _ItemDraft(id: item.id);
@@ -134,10 +172,12 @@ class _AddSessionScreenState extends ConsumerState<AddSessionScreen> {
     if (_items.isEmpty) _addItem(scrollToBottom: false);
   }
 
-  Future<void> _loadExistingImage(String path) async {
-    final file = await ref.read(imageServiceProvider).getFile(path);
-    if (mounted && file != null) {
-      setState(() => _imageFile = file);
+  Future<void> _loadExistingImages(List<String> paths) async {
+    for (final path in paths) {
+      final file = await ref.read(imageServiceProvider).getFile(path);
+      if (mounted && file != null) {
+        setState(() => _images.add((path: path, file: file)));
+      }
     }
   }
 
@@ -366,14 +406,25 @@ class _AddSessionScreenState extends ConsumerState<AddSessionScreen> {
               ],
             ),
 
-            // ── Image attachment ─────────────────────────────────────
+            // ── Image attachments ────────────────────────────────────
             const SizedBox(height: 24),
-            const _SectionDivider(label: 'Photo'),
+            const _SectionDivider(label: 'Photos'),
             const SizedBox(height: 12),
-            _ImageAttachment(
-              imageFile: _imageFile,
-              onPickImage: _pickImage,
-              onRemoveImage: _removeImage,
+            _MultiImageAttachment(
+              images: _images,
+              onAdd: _pickImages,
+              onRemove: (index) => _removeImage(index),
+            ),
+
+            // ── Location ─────────────────────────────────────────────
+            const SizedBox(height: 24),
+            const _SectionDivider(label: 'Location'),
+            const SizedBox(height: 12),
+            _LocationRow(
+              locationData: _locationData,
+              isLoading: _locationLoading,
+              onCapture: () => _captureLocation(),
+              onClear: () => setState(() => _locationData = null),
             ),
 
             // ── Spending note ────────────────────────────────────────
@@ -455,13 +506,31 @@ class _AddSessionScreenState extends ConsumerState<AddSessionScreen> {
   }
 
   Future<void> _pickDate() async {
-    final picked = await showDatePicker(
+    final pickedDate = await showDatePicker(
       context: context,
       initialDate: _date,
       firstDate: DateTime(2020),
       lastDate: DateTime.now(),
     );
-    if (picked != null) setState(() => _date = picked);
+    if (pickedDate == null || !mounted) return;
+
+    // Immediately follow with a time picker — default to existing time
+    final pickedTime = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay(hour: _date.hour, minute: _date.minute),
+    );
+
+    setState(() {
+      final hour = pickedTime?.hour ?? _date.hour;
+      final minute = pickedTime?.minute ?? _date.minute;
+      _date = DateTime(
+        pickedDate.year,
+        pickedDate.month,
+        pickedDate.day,
+        hour,
+        minute,
+      );
+    });
   }
 
   Future<void> _pickTagsFor(_ItemDraft item) async {
@@ -694,17 +763,28 @@ class _AddSessionScreenState extends ConsumerState<AddSessionScreen> {
     );
   }
 
-  Future<void> _pickImage(ImageSource source) async {
+  Future<void> _pickImages(ImageSource source) async {
     final imageService = ref.read(imageServiceProvider);
-    final tempId = IdGenerator.generate();
     try {
-      final relativePath = await imageService.pickAndSave(source, tempId);
-      if (relativePath == null) return;
-      final file = await imageService.getFile(relativePath);
-      setState(() {
-        _imagePath = relativePath;
-        _imageFile = file;
-      });
+      final paths = await imageService.pickMultipleAndSave(
+        source,
+        IdGenerator.generate,
+      );
+      for (final path in paths) {
+        final file = await imageService.getFile(path);
+        if (file != null && mounted) {
+          setState(() => _images.add((path: path, file: file)));
+        }
+      }
+    } on Exception catch (e) {
+      if (!mounted) return;
+      final message = e.toString().trim();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message.isEmpty ? 'Could not attach image.' : message),
+          duration: const Duration(seconds: 4),
+        ),
+      );
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -714,14 +794,10 @@ class _AddSessionScreenState extends ConsumerState<AddSessionScreen> {
     }
   }
 
-  void _removeImage() {
-    if (_imagePath != null) {
-      ref.read(imageServiceProvider).delete(_imagePath!);
-    }
-    setState(() {
-      _imagePath = null;
-      _imageFile = null;
-    });
+  void _removeImage(int index) {
+    final img = _images[index];
+    ref.read(imageServiceProvider).delete(img.path);
+    setState(() => _images.removeAt(index));
   }
 
   Future<void> _save() async {
@@ -761,18 +837,14 @@ class _AddSessionScreenState extends ConsumerState<AddSessionScreen> {
       if (saveMode == null) return;
       final isPending = saveMode == _SessionSaveMode.pending;
 
-      // Handle image path for new sessions
-      String? finalImagePath = _imagePath;
-      if (!_isEditing && _imagePath != null) {
-        final imageService = ref.read(imageServiceProvider);
-        final oldFile = await imageService.getFile(_imagePath!);
-        if (oldFile != null) {
-          final newRelative = 'transaction_images/$sessionId.jpg';
-          await oldFile.rename(
-            oldFile.path.replaceAll(_imagePath!, newRelative),
-          );
-          finalImagePath = newRelative;
-        }
+      final currentPaths = _images.map((img) => img.path).toList();
+
+      // When editing, delete any images that were removed
+      if (_isEditing) {
+        final removedPaths = _editTransaction!.images
+            .where((p) => !currentPaths.contains(p))
+            .toList();
+        await ref.read(imageServiceProvider).deleteAll(removedPaths);
       }
 
       final session = TransactionModel(
@@ -784,9 +856,12 @@ class _AddSessionScreenState extends ConsumerState<AddSessionScreen> {
             : TransactionModel.recordedStatus,
         title: title,
         notes: notes,
-        imagePath: finalImagePath,
+        images: currentPaths,
         pendingUntil: isPending ? now.add(const Duration(hours: 24)) : null,
         emotion: _selectedEmotion,
+        latitude: _locationData?.latitude,
+        longitude: _locationData?.longitude,
+        locationLabel: _locationData?.label,
         createdAt: _isEditing ? _editTransaction!.createdAt : now,
       );
 
@@ -804,11 +879,6 @@ class _AddSessionScreenState extends ConsumerState<AddSessionScreen> {
       }).toList();
 
       if (_isEditing) {
-        // If the image changed, delete the old one
-        final oldImagePath = _editTransaction!.imagePath;
-        if (oldImagePath != null && oldImagePath != finalImagePath) {
-          await ref.read(imageServiceProvider).delete(oldImagePath);
-        }
         await ref
             .read(transactionsProvider.notifier)
             .editSession(session, items);
@@ -934,8 +1004,15 @@ class _ItemCardState extends State<_ItemCard> {
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
         color: Theme.of(context).cardTheme.color,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: AppColors.divider),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.divider.withValues(alpha: 0.86)),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.shadow.withValues(alpha: 0.04),
+            blurRadius: 18,
+            offset: const Offset(0, 8),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -968,12 +1045,16 @@ class _ItemCardState extends State<_ItemCard> {
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
             child: TextField(
               controller: item.descController,
-              decoration: const InputDecoration(
+              decoration: _itemFieldDecoration(
+                context,
                 hintText: 'What was this for?',
-                border: InputBorder.none,
-                contentPadding: EdgeInsets.zero,
+                icon: Icons.notes_rounded,
+                focusColor: AppColors.primary,
               ),
-              style: Theme.of(context).textTheme.titleMedium,
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                color: AppColors.textSoft,
+                fontWeight: FontWeight.w600,
+              ),
               onChanged: (_) {
                 widget.onChanged();
                 // Auto-suggest value when description changes
@@ -989,16 +1070,32 @@ class _ItemCardState extends State<_ItemCard> {
               controller: item.amountController,
               keyboardType: TextInputType.number,
               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
                 fontFamily: 'JetBrains Mono',
                 color: amountColor,
+                fontWeight: FontWeight.w700,
               ),
-              decoration: const InputDecoration(
-                hintText: '0',
-                prefixText: 'Rp ',
-                border: InputBorder.none,
-                contentPadding: EdgeInsets.zero,
-              ),
+              decoration:
+                  _itemFieldDecoration(
+                    context,
+                    hintText: '0',
+                    icon: Icons.payments_outlined,
+                    focusColor: amountColor,
+                    prefixText: 'Rp ',
+                  ).copyWith(
+                    hintStyle: Theme.of(context).textTheme.headlineSmall
+                        ?.copyWith(
+                          color: amountColor.withValues(alpha: 0.42),
+                          fontFamily: 'JetBrains Mono',
+                          fontWeight: FontWeight.w700,
+                        ),
+                    prefixStyle: Theme.of(context).textTheme.headlineSmall
+                        ?.copyWith(
+                          color: amountColor.withValues(alpha: 0.72),
+                          fontFamily: 'JetBrains Mono',
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
               onChanged: (val) {
                 final formatted = CurrencyUtils.formatInput(val);
                 if (formatted != val) {
@@ -1363,74 +1460,152 @@ class _ItemCardState extends State<_ItemCard> {
       ),
     );
   }
+
+  InputDecoration _itemFieldDecoration(
+    BuildContext context, {
+    required String hintText,
+    required IconData icon,
+    required Color focusColor,
+    String? prefixText,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final fill = isDark
+        ? AppColors.darkSurface.withValues(alpha: 0.82)
+        : AppColors.surface.withValues(alpha: 0.92);
+    final borderColor = isDark
+        ? AppColors.darkTextSecondary.withValues(alpha: 0.18)
+        : AppColors.divider.withValues(alpha: 0.95);
+
+    OutlineInputBorder border(Color color, {double width = 1}) {
+      return OutlineInputBorder(
+        borderRadius: BorderRadius.circular(18),
+        borderSide: BorderSide(color: color, width: width),
+      );
+    }
+
+    return InputDecoration(
+      hintText: hintText,
+      prefixText: prefixText,
+      prefixIcon: Icon(icon, size: 19, color: AppColors.textSecondary),
+      prefixIconConstraints: const BoxConstraints(minWidth: 46, minHeight: 48),
+      prefixStyle: Theme.of(context).textTheme.titleMedium?.copyWith(
+        color: AppColors.textSecondary,
+        fontFamily: 'JetBrains Mono',
+        fontWeight: FontWeight.w700,
+      ),
+      hintStyle: Theme.of(context).textTheme.titleMedium?.copyWith(
+        color: AppColors.textSecondary.withValues(alpha: 0.88),
+        fontWeight: FontWeight.w600,
+      ),
+      filled: true,
+      fillColor: fill,
+      contentPadding: const EdgeInsets.fromLTRB(2, 18, 18, 18),
+      border: border(borderColor),
+      enabledBorder: border(borderColor),
+      focusedBorder: border(focusColor.withValues(alpha: 0.82), width: 1.4),
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Image attachment widget
 // ---------------------------------------------------------------------------
 
-class _ImageAttachment extends StatelessWidget {
-  const _ImageAttachment({
-    required this.imageFile,
-    required this.onPickImage,
-    required this.onRemoveImage,
+class _MultiImageAttachment extends StatelessWidget {
+  const _MultiImageAttachment({
+    required this.images,
+    required this.onAdd,
+    required this.onRemove,
   });
 
-  final File? imageFile;
-  final Future<void> Function(ImageSource) onPickImage;
-  final VoidCallback onRemoveImage;
+  final List<({String path, File file})> images;
+  final Future<void> Function(ImageSource) onAdd;
+  final void Function(int index) onRemove;
+
+  static const _maxImages = 5;
 
   @override
   Widget build(BuildContext context) {
-    if (imageFile != null) {
-      return Stack(
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: Image.file(
-              imageFile!,
-              width: double.infinity,
-              height: 180,
-              fit: BoxFit.cover,
-            ),
-          ),
-          Positioned(
-            top: 8,
-            right: 8,
-            child: GestureDetector(
-              onTap: onRemoveImage,
-              child: Container(
-                padding: const EdgeInsets.all(4),
-                decoration: const BoxDecoration(
-                  color: Colors.black54,
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.close, color: Colors.white, size: 16),
-              ),
-            ),
-          ),
-        ],
-      ).animate().scale(
-        begin: const Offset(0.85, 0.85),
-        end: const Offset(1.0, 1.0),
-        duration: 300.ms,
-        curve: Curves.easeOutBack,
-      ).fadeIn(duration: 220.ms);
-    }
+    final canAdd = images.length < _maxImages;
 
-    return Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _CameraButton(
-          icon: Icons.camera_alt_outlined,
-          label: 'Camera',
-          onTap: () => onPickImage(ImageSource.camera),
-        ),
-        const SizedBox(width: 12),
-        _CameraButton(
-          icon: Icons.photo_library_outlined,
-          label: 'Gallery',
-          onTap: () => onPickImage(ImageSource.gallery),
-        ),
+        if (images.isNotEmpty)
+          SizedBox(
+            height: 96,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: images.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              itemBuilder: (context, i) {
+                return Stack(
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: Image.file(
+                        images[i].file,
+                        width: 96,
+                        height: 96,
+                        fit: BoxFit.cover,
+                      ),
+                    ),
+                    Positioned(
+                      top: 4,
+                      right: 4,
+                      child: GestureDetector(
+                        onTap: () => onRemove(i),
+                        child: Container(
+                          padding: const EdgeInsets.all(3),
+                          decoration: const BoxDecoration(
+                            color: Colors.black54,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.close,
+                            color: Colors.white,
+                            size: 13,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ).animate().scale(
+                  begin: const Offset(0.8, 0.8),
+                  end: const Offset(1.0, 1.0),
+                  duration: 260.ms,
+                  curve: Curves.easeOutBack,
+                );
+              },
+            ),
+          ),
+        if (images.isNotEmpty && canAdd) const SizedBox(height: 10),
+        if (canAdd)
+          Row(
+            children: [
+              _CameraButton(
+                icon: Icons.camera_alt_outlined,
+                label: 'Camera',
+                onTap: () => onAdd(ImageSource.camera),
+              ),
+              const SizedBox(width: 12),
+              _CameraButton(
+                icon: Icons.photo_library_outlined,
+                label: images.isEmpty ? 'Gallery' : 'Add more',
+                onTap: () => onAdd(ImageSource.gallery),
+              ),
+              if (images.isNotEmpty) ...[
+                const Spacer(),
+                Text(
+                  '${images.length}/$_maxImages',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ],
+            ],
+          ),
       ],
     );
   }
@@ -1576,7 +1751,10 @@ class _DateRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isToday = _isToday(date);
-    final label = isToday ? 'Today' : '${date.day}/${date.month}/${date.year}';
+    final dateLabel = isToday
+        ? 'Today'
+        : '${date.day}/${date.month}/${date.year}';
+    final timeLabel = AppDateUtils.formatTime(date);
 
     return GestureDetector(
       onTap: onTap,
@@ -1590,7 +1768,7 @@ class _DateRow extends StatelessWidget {
           ),
           const SizedBox(width: 6),
           Text(
-            label,
+            '$dateLabel · $timeLabel',
             style: Theme.of(
               context,
             ).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
@@ -1771,6 +1949,125 @@ class _SectionDivider extends StatelessWidget {
         ),
         const Expanded(child: Divider()),
       ],
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Location row
+// ---------------------------------------------------------------------------
+
+class _LocationRow extends StatelessWidget {
+  const _LocationRow({
+    required this.locationData,
+    required this.isLoading,
+    required this.onCapture,
+    required this.onClear,
+  });
+
+  final LocationData? locationData;
+  final bool isLoading;
+  final VoidCallback onCapture;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    if (isLoading) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: Theme.of(context).cardTheme.color,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.divider),
+        ),
+        child: const Row(
+          children: [
+            SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            SizedBox(width: 12),
+            Text('Getting your location...'),
+          ],
+        ),
+      );
+    }
+
+    if (locationData != null) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: AppColors.secondary.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.secondary.withValues(alpha: 0.2)),
+        ),
+        child: Row(
+          children: [
+            const Icon(
+              Icons.location_on_rounded,
+              size: 18,
+              color: AppColors.secondary,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                locationData!.label,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: AppColors.secondaryDeep,
+                  fontWeight: FontWeight.w500,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: onClear,
+              child: Icon(
+                Icons.close,
+                size: 16,
+                color: AppColors.textSecondary.withValues(alpha: 0.7),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // No location — show a subtle button
+    return GestureDetector(
+      onTap: onCapture,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: Theme.of(context).cardTheme.color,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.divider),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              Icons.location_off_outlined,
+              size: 18,
+              color: AppColors.textSecondary.withValues(alpha: 0.6),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              'Tap to capture location',
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
+            ),
+            const Spacer(),
+            Icon(
+              Icons.my_location_outlined,
+              size: 16,
+              color: AppColors.primary.withValues(alpha: 0.7),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

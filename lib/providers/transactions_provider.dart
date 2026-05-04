@@ -110,6 +110,26 @@ final monthlyExpenseAmountProvider = FutureProvider<int>((ref) {
       .getTotalForMonth(month, 'expense');
 });
 
+/// All-time cumulative income — every rupiah ever recorded as income.
+final allTimeIncomeProvider = FutureProvider<int>((ref) {
+  ref.watch(transactionsProvider);
+  return ref.read(transactionsRepositoryProvider).getAllTimeTotal('income');
+});
+
+/// All-time cumulative expenses — every rupiah ever recorded as expense.
+final allTimeExpenseProvider = FutureProvider<int>((ref) {
+  ref.watch(transactionsProvider);
+  return ref.read(transactionsRepositoryProvider).getAllTimeTotal('expense');
+});
+
+/// The real available balance: total income ever − total expenses ever.
+/// This is the money the user actually has available right now.
+final availableBalanceProvider = FutureProvider<int>((ref) async {
+  final income = await ref.watch(allTimeIncomeProvider.future);
+  final expenses = await ref.watch(allTimeExpenseProvider.future);
+  return income - expenses;
+});
+
 final spendingByValueProvider = FutureProvider<Map<String, int>>((ref) {
   ref.watch(transactionsProvider); // re-run when transactions mutate
   final month = AppDateUtils.currentMonthKey();

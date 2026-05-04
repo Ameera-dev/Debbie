@@ -42,6 +42,38 @@ class TransactionsRepository {
         .toList();
   }
 
+  /// Attach image paths to a list of sessions using a single bulk query.
+  Future<List<TransactionModel>> _attachImages(
+    Database db,
+    List<TransactionModel> sessions,
+  ) async {
+    if (sessions.isEmpty) return sessions;
+    final ids = sessions.map((s) => s.id).toList();
+    final placeholders = List.filled(ids.length, '?').join(',');
+    final imageRows = await db.rawQuery(
+      'SELECT transaction_id, image_path FROM ${Tables.transactionImages} '
+      'WHERE transaction_id IN ($placeholders) '
+      'ORDER BY sort_order ASC, created_at ASC',
+      ids,
+    );
+    final imagesByTx = <String, List<String>>{};
+    for (final row in imageRows) {
+      final txId = row['transaction_id'] as String;
+      imagesByTx.putIfAbsent(txId, () => []).add(row['image_path'] as String);
+    }
+    return sessions
+        .map((s) => s.copyWith(images: imagesByTx[s.id] ?? <String>[]))
+        .toList();
+  }
+
+  Future<List<TransactionModel>> _attachAll(
+    Database db,
+    List<TransactionModel> sessions,
+  ) async {
+    final withItems = await _attachItems(db, sessions);
+    return _attachImages(db, withItems);
+  }
+
   // ---------------------------------------------------------------------------
   // Read operations
   // ---------------------------------------------------------------------------
@@ -102,7 +134,7 @@ class TransactionsRepository {
     }
 
     final sessions = rows.map(TransactionModel.fromMap).toList();
-    return _attachItems(db, sessions);
+    return _attachAll(db, sessions);
   }
 
   Future<List<TransactionModel>> getForMonth(String month) async {
@@ -117,7 +149,7 @@ class TransactionsRepository {
       [month, TransactionModel.recordedStatus],
     );
     final sessions = rows.map(TransactionModel.fromMap).toList();
-    return _attachItems(db, sessions);
+    return _attachAll(db, sessions);
   }
 
   Future<TransactionModel?> getById(String id) async {
@@ -143,14 +175,14 @@ class TransactionsRepository {
       orderBy: 'pending_until ASC, date DESC, created_at DESC',
     );
     final sessions = rows.map(TransactionModel.fromMap).toList();
-    return _attachItems(db, sessions);
+    return _attachAll(db, sessions);
   }
 
   // ---------------------------------------------------------------------------
   // Write operations
   // ---------------------------------------------------------------------------
 
-  /// Insert a session and all its items atomically.
+  /// Insert a session, its items, and its images atomically.
   Future<void> insertSession(
     TransactionModel session,
     List<TransactionItemModel> items,
@@ -169,10 +201,23 @@ class TransactionsRepository {
           conflictAlgorithm: ConflictAlgorithm.replace,
         );
       }
+      for (int i = 0; i < session.images.length; i++) {
+        await txn.insert(
+          Tables.transactionImages,
+          {
+            'id': '${session.id}_img_$i',
+            'transaction_id': session.id,
+            'image_path': session.images[i],
+            'sort_order': i,
+            'created_at': session.createdAt.toIso8601String(),
+          },
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
     });
   }
 
-  /// Update a session and replace all its items atomically.
+  /// Update a session, replacing all its items and images atomically.
   Future<void> updateSession(
     TransactionModel session,
     List<TransactionItemModel> items,
@@ -194,6 +239,24 @@ class TransactionsRepository {
         await txn.insert(
           Tables.transactionItems,
           item.toMap(),
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
+      await txn.delete(
+        Tables.transactionImages,
+        where: 'transaction_id = ?',
+        whereArgs: [session.id],
+      );
+      for (int i = 0; i < session.images.length; i++) {
+        await txn.insert(
+          Tables.transactionImages,
+          {
+            'id': '${session.id}_img_$i',
+            'transaction_id': session.id,
+            'image_path': session.images[i],
+            'sort_order': i,
+            'created_at': session.createdAt.toIso8601String(),
+          },
           conflictAlgorithm: ConflictAlgorithm.replace,
         );
       }
@@ -235,6 +298,46 @@ class TransactionsRepository {
     return rows.first['total'] as int? ?? 0;
   }
 
+  /// All-time total for a transaction type — no date filter.
+  Future<int> getAllTimeTotal(String type) async {
+    final db = await _db.database;
+    final rows = await db.rawQuery(
+      '''
+      SELECT COALESCE(SUM(ti.amount), 0) AS total
+      FROM ${Tables.transactionItems} ti
+      JOIN ${Tables.transactions} t ON t.id = ti.transaction_id
+      WHERE t.type = ? AND t.status = ?
+      ''',
+      [type, TransactionModel.recordedStatus],
+    );
+    return rows.first['total'] as int? ?? 0;
+  }
+
+  /// Total within an arbitrary date range.
+  Future<int> getTotalForRange(
+    String type,
+    DateTime from,
+    DateTime to,
+  ) async {
+    final db = await _db.database;
+    final rows = await db.rawQuery(
+      '''
+      SELECT COALESCE(SUM(ti.amount), 0) AS total
+      FROM ${Tables.transactionItems} ti
+      JOIN ${Tables.transactions} t ON t.id = ti.transaction_id
+      WHERE t.type = ? AND t.status = ?
+        AND t.date >= ? AND t.date <= ?
+      ''',
+      [
+        type,
+        TransactionModel.recordedStatus,
+        from.toIso8601String(),
+        to.toIso8601String(),
+      ],
+    );
+    return rows.first['total'] as int? ?? 0;
+  }
+
   Future<Map<String, int>> getSpendingByValue(String month) async {
     final db = await _db.database;
     final rows = await db.rawQuery(
@@ -268,16 +371,15 @@ class TransactionsRepository {
     return rows.map((r) => r['description'] as String).toList();
   }
 
-  Future<String?> getImagePath(String id) async {
+  Future<List<String>> getImagePaths(String transactionId) async {
     final db = await _db.database;
     final rows = await db.query(
-      Tables.transactions,
+      Tables.transactionImages,
       columns: ['image_path'],
-      where: 'id = ?',
-      whereArgs: [id],
-      limit: 1,
+      where: 'transaction_id = ?',
+      whereArgs: [transactionId],
+      orderBy: 'sort_order ASC',
     );
-    if (rows.isEmpty) return null;
-    return rows.first['image_path'] as String?;
+    return rows.map((r) => r['image_path'] as String).toList();
   }
 }
