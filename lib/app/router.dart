@@ -19,6 +19,7 @@ import '../features/reflect/screens/reflect_screen.dart';
 import '../features/settings/screens/settings_screen.dart';
 import '../features/splash/splash_screen.dart';
 import '../features/recurring/screens/add_recurring_screen.dart';
+import '../features/recurring/screens/recurring_history_screen.dart';
 import '../features/recurring/screens/recurring_screen.dart';
 import '../features/transactions/screens/add_session_screen.dart';
 import '../features/transactions/screens/transaction_detail_screen.dart';
@@ -62,14 +63,22 @@ class _RouterNotifier extends ChangeNotifier {
       onboardingCompleteProvider,
       (_, __) => notifyListeners(),
     );
+    Future.delayed(_minSplashDuration, () {
+      _minSplashElapsed = true;
+      notifyListeners();
+    });
   }
 
+  static const _minSplashDuration = Duration(milliseconds: 2400);
+
   final Ref _ref;
+  bool _minSplashElapsed = false;
 
   bool get isOnboardingComplete =>
       _ref.read(onboardingCompleteProvider).valueOrNull ?? false;
 
-  bool get isLoading => _ref.read(onboardingCompleteProvider).isLoading;
+  bool get isLoading =>
+      _ref.read(onboardingCompleteProvider).isLoading || !_minSplashElapsed;
 }
 
 final routerProvider = Provider<GoRouter>((ref) {
@@ -160,9 +169,7 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/transactions/:id',
         pageBuilder: (_, state) => _slidePage(
           state.pageKey,
-          TransactionDetailScreen(
-            transactionId: state.pathParameters['id']!,
-          ),
+          TransactionDetailScreen(transactionId: state.pathParameters['id']!),
         ),
       ),
 
@@ -218,12 +225,15 @@ final routerProvider = Provider<GoRouter>((ref) {
             _slidePage(state.pageKey, const AddRecurringScreen()),
       ),
       GoRoute(
+        path: '/recurring/history',
+        pageBuilder: (_, state) =>
+            _slidePage(state.pageKey, const RecurringHistoryScreen()),
+      ),
+      GoRoute(
         path: '/recurring/edit',
         pageBuilder: (_, state) => _slidePage(
           state.pageKey,
-          AddRecurringScreen(
-            editExpense: state.extra as dynamic,
-          ),
+          AddRecurringScreen(editExpense: state.extra as dynamic),
         ),
       ),
 

@@ -26,9 +26,9 @@ class MindfulnessContent {
     MoneyEmotionOption(id: 'joyful', label: 'Joyful', emoji: '☀️'),
     MoneyEmotionOption(id: 'anxious', label: 'Anxious', emoji: '🌫️'),
     MoneyEmotionOption(id: 'impulsive', label: 'Impulsive', emoji: '⚡'),
-    MoneyEmotionOption(id: 'intentional', label: 'Intentional', emoji: '🫶'),
+    MoneyEmotionOption(id: 'intentional', label: 'Intentional', emoji: '🎯'),
     MoneyEmotionOption(id: 'generous', label: 'Generous', emoji: '🎁'),
-    MoneyEmotionOption(id: 'guilty', label: 'Guilty', emoji: '🪞'),
+    MoneyEmotionOption(id: 'guilty', label: 'Guilty', emoji: '😔'),
     MoneyEmotionOption(id: 'proud', label: 'Proud', emoji: '🌱'),
   ];
 

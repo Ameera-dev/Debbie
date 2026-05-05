@@ -205,6 +205,57 @@ class Tables {
     createRecurringExpenses,
     createRecurringExpensePayments,
   ];
+
+  /// Tables that must be included in a full Google Drive backup.
+  static const backupTables = [
+    userValues,
+    valuesPlan,
+    goals,
+    transactions,
+    transactionItems,
+    transactionImages,
+    journal,
+    dailyIntentions,
+    weeklyBudgetPlans,
+    settings,
+    aiReflections,
+    recurringExpenses,
+    recurringExpensePayments,
+  ];
+
+  /// Clear child tables before parents when replacing the local database.
+  static const restoreDeleteOrder = [
+    recurringExpensePayments,
+    transactionImages,
+    transactionItems,
+    dailyIntentions,
+    recurringExpenses,
+    aiReflections,
+    journal,
+    weeklyBudgetPlans,
+    transactions,
+    goals,
+    valuesPlan,
+    userValues,
+    settings,
+  ];
+
+  /// Insert parents before children so foreign keys can be restored safely.
+  static const restoreInsertOrder = [
+    userValues,
+    valuesPlan,
+    goals,
+    transactions,
+    transactionItems,
+    transactionImages,
+    journal,
+    dailyIntentions,
+    weeklyBudgetPlans,
+    settings,
+    aiReflections,
+    recurringExpenses,
+    recurringExpensePayments,
+  ];
 }
 
 class SettingsKeys {
@@ -219,4 +270,6 @@ class SettingsKeys {
   static const geminiApiKey = 'gemini_api_key';
   static const autoBackup = 'auto_backup';
   static const coolingOffThreshold = 'cooling_off_threshold';
+  static const todayFocusIntroSeen = 'today_focus_intro_seen';
+  static const balanceVisible = 'balance_visible';
 }

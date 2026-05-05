@@ -1,7 +1,7 @@
 name: debbie
 description: A mindful money companion that connects spending to personal values.
 publish_to: 'none'
-version: 1.0.0+1
+version: 2.1.0+1
 
 environment:
   sdk: ^3.11.4
@@ -59,6 +59,7 @@ dependencies:
 
   # Animations
   flutter_animate: ^4.5.0
+  package_info_plus: ^9.0.1
 
 dev_dependencies:
   flutter_test:
@@ -72,10 +73,13 @@ flutter_launcher_icons:
   android: true
   ios: true
   image_path: "assets/app_icon.png"
-  adaptive_icon_background: "assets/app_icon_adaptive_background.png"
+  adaptive_icon_background: "#F1E9D9"
   adaptive_icon_foreground: "assets/app_icon_adaptive_foreground.png"
-  adaptive_icon_foreground_inset: 12
+  adaptive_icon_foreground_inset: 0
   remove_alpha_ios: true
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/app_icon_adaptive_foreground.png
+    - assets/google_fonts/

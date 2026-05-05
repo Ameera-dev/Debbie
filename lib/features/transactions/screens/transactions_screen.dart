@@ -201,7 +201,10 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
                   // Group by range-aware label (preserves insertion order)
                   final grouped = <String, List<TransactionModel>>{};
                   for (final tx in filtered) {
-                    final label = AppDateUtils.groupLabelForRange(tx.date, _range);
+                    final label = AppDateUtils.groupLabelForRange(
+                      tx.date,
+                      _range,
+                    );
                     grouped.putIfAbsent(label, () => []).add(tx);
                   }
                   final groups = grouped.entries.toList();
@@ -271,6 +274,10 @@ class _TransactionsScreenState extends ConsumerState<TransactionsScreen> {
     final typeStr = _filters.typeString;
     if (typeStr != null) {
       result = result.where((tx) => tx.type == typeStr).toList();
+    } else if (!_filters.includesSavings) {
+      // Savings live silently — hidden from the default "All" view unless
+      // the user opts in via the Savings eye chip.
+      result = result.where((tx) => !tx.isSaving).toList();
     }
 
     // Value filter
@@ -332,6 +339,7 @@ class _CalendarHeader extends StatelessWidget {
   Map<DateTime, (int, int)> get _dayTotals {
     final map = <DateTime, (int, int)>{};
     for (final tx in transactions) {
+      if (tx.isSaving) continue; // savings are silent — never on the calendar
       final key = DateTime(tx.date.year, tx.date.month, tx.date.day);
       final current = map[key] ?? (0, 0);
       if (tx.isIncome) {
@@ -484,58 +492,74 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 72,
-              height: 72,
-              decoration: BoxDecoration(
-                color: AppColors.primary.withValues(alpha: 0.08),
-                shape: BoxShape.circle,
-              ),
-              child: Center(
-                child: Text(
-                  hasFilters ? '🔍' : '💸',
-                  style: const TextStyle(fontSize: 32),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final minHeight = constraints.maxHeight > 48
+            ? constraints.maxHeight - 48
+            : 0.0;
+
+        return SingleChildScrollView(
+          physics: const BouncingScrollPhysics(),
+          padding: const EdgeInsets.all(24),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: minHeight),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 320),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 72,
+                      height: 72,
+                      decoration: BoxDecoration(
+                        color: AppColors.primary.withValues(alpha: 0.08),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Center(
+                        child: Text(
+                          hasFilters ? '🔍' : '💸',
+                          style: const TextStyle(fontSize: 32),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    Text(
+                      hasFilters
+                          ? 'No transactions match your filters'
+                          : 'No transactions yet',
+                      style: Theme.of(context).textTheme.titleMedium,
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      hasFilters
+                          ? 'Try adjusting your filters to see more.'
+                          : 'Tap + to add your first transaction\nand start tracking your energy.',
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: AppColors.textSecondary,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    if (hasFilters) ...[
+                      const SizedBox(height: 18),
+                      OutlinedButton.icon(
+                        onPressed: onClear,
+                        icon: const Icon(Icons.filter_alt_off, size: 16),
+                        label: const Text('Clear all filters'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppColors.primary,
+                          side: const BorderSide(color: AppColors.primary),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ),
             ),
-            const SizedBox(height: 20),
-            Text(
-              hasFilters
-                  ? 'No transactions match your filters'
-                  : 'No transactions yet',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              hasFilters
-                  ? 'Try adjusting your filters to see more.'
-                  : 'Tap + to add your first transaction\nand start tracking your energy.',
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
-              textAlign: TextAlign.center,
-            ),
-            if (hasFilters) ...[
-              const SizedBox(height: 20),
-              OutlinedButton.icon(
-                onPressed: onClear,
-                icon: const Icon(Icons.filter_alt_off, size: 16),
-                label: const Text('Clear all filters'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.primary,
-                  side: const BorderSide(color: AppColors.primary),
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
   }
 }
@@ -602,14 +626,19 @@ class _RangeSummary extends StatelessWidget {
   Widget build(BuildContext context) {
     int totalIncome = 0;
     int totalExpense = 0;
+    int totalSaving = 0;
     for (final tx in transactions) {
       if (tx.isIncome) {
         totalIncome += tx.totalAmount;
+      } else if (tx.isSaving) {
+        totalSaving += tx.totalAmount;
       } else {
         totalExpense += tx.totalAmount;
       }
     }
-    final balance = totalIncome - totalExpense;
+    // Savings feel "gone" from the active pool, like an expense — they
+    // reduce balance but stay out of the income/expense story.
+    final balance = totalIncome - totalExpense - totalSaving;
     final total = totalIncome + totalExpense;
     final incomeRatio = total > 0 ? totalIncome / total : 0.5;
     final isPositive = balance >= 0;
@@ -856,10 +885,12 @@ class _SummaryItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final displayText = isCount ? '$amount' : '$prefix ${CurrencyUtils.format(amount)}';
+    final displayText = isCount
+        ? '$amount'
+        : '$prefix ${CurrencyUtils.format(amount)}';
     return Expanded(
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 8),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -871,15 +902,18 @@ class _SummaryItem extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 3),
-            Text(
-              displayText,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                fontFamily: 'JetBrains Mono',
-                fontWeight: FontWeight.w700,
-                color: color,
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                displayText,
+                maxLines: 1,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  fontFamily: 'JetBrains Mono',
+                  fontWeight: FontWeight.w700,
+                  color: color,
+                ),
               ),
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
             ),
           ],
         ),
@@ -909,9 +943,12 @@ class _DateGroup extends StatelessWidget {
   Widget build(BuildContext context) {
     int dailyIncome = 0;
     int dailyExpense = 0;
+    int dailySaving = 0;
     for (final tx in transactions) {
       if (tx.isIncome) {
         dailyIncome += tx.totalAmount;
+      } else if (tx.isSaving) {
+        dailySaving += tx.totalAmount;
       } else {
         dailyExpense += tx.totalAmount;
       }
@@ -941,52 +978,57 @@ class _DateGroup extends StatelessWidget {
               ),
               const SizedBox(width: 12),
               // Net for this group as a compact pill
-              if (dailyExpense > 0 || dailyIncome > 0)
-                Builder(builder: (context) {
-                  final net = dailyIncome - dailyExpense;
-                  final isPositive = net >= 0;
-                  final color = isPositive ? AppColors.income : AppColors.expense;
-                  final label = isPositive
-                      ? '+${CurrencyUtils.format(net)}'
-                      : '-${CurrencyUtils.format(net.abs())}';
-                  return Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 7,
-                      vertical: 2,
-                    ),
-                    decoration: BoxDecoration(
-                      color: color.withValues(alpha: 0.10),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      label,
-                      style: TextStyle(
-                        fontSize: 10,
-                        fontFamily: 'JetBrains Mono',
-                        fontWeight: FontWeight.w700,
-                        color: color.withValues(alpha: 0.85),
+              if (dailyExpense > 0 || dailyIncome > 0 || dailySaving > 0)
+                Builder(
+                  builder: (context) {
+                    final net = dailyIncome - dailyExpense - dailySaving;
+                    final isPositive = net >= 0;
+                    final color = isPositive
+                        ? AppColors.income
+                        : AppColors.expense;
+                    final label = isPositive
+                        ? '+${CurrencyUtils.format(net)}'
+                        : '-${CurrencyUtils.format(net.abs())}';
+                    return Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 2,
                       ),
-                    ),
-                  );
-                }),
+                      decoration: BoxDecoration(
+                        color: color.withValues(alpha: 0.10),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        label,
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontFamily: 'JetBrains Mono',
+                          fontWeight: FontWeight.w700,
+                          color: color.withValues(alpha: 0.85),
+                        ),
+                      ),
+                    );
+                  },
+                ),
             ],
           ),
         ),
         ...transactions.indexed.map(
-          ((int, TransactionModel) pair) => _DismissibleTile(
-            key: ValueKey(pair.$2.id),
-            transaction: pair.$2,
-            values: values,
-            ref: ref,
-          )
-              .animate(delay: Duration(milliseconds: pair.$1 * 40))
-              .fadeIn(duration: 280.ms, curve: Curves.easeOut)
-              .slideX(
-                begin: 0.06,
-                end: 0,
-                duration: 280.ms,
-                curve: Curves.easeOut,
-              ),
+          ((int, TransactionModel) pair) =>
+              _DismissibleTile(
+                    key: ValueKey(pair.$2.id),
+                    transaction: pair.$2,
+                    values: values,
+                    ref: ref,
+                  )
+                  .animate(delay: Duration(milliseconds: pair.$1 * 40))
+                  .fadeIn(duration: 280.ms, curve: Curves.easeOut)
+                  .slideX(
+                    begin: 0.06,
+                    end: 0,
+                    duration: 280.ms,
+                    curve: Curves.easeOut,
+                  ),
         ),
       ],
     );
@@ -1072,7 +1114,9 @@ class _TransactionTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final tx = transaction;
     final isExpense = tx.isExpense;
-    final amountColor = isExpense ? AppColors.expense : AppColors.income;
+    final amountColor = tx.isSaving
+        ? AppColors.saving
+        : (isExpense ? AppColors.expense : AppColors.income);
     final emotion = MindfulnessContent.emotionById(tx.emotion);
 
     // Find primary value (most items mapped to)
@@ -1095,8 +1139,8 @@ class _TransactionTile extends StatelessWidget {
     final firstTagIcon = (firstItem != null && firstItem.tags.isNotEmpty)
         ? DefaultTags.parentOf(firstItem.tags.first, tx.type)?.icon
         : null;
-    final icon =
-        primaryValue?.icon ?? firstTagIcon ?? (isExpense ? '💸' : '💰');
+    final fallbackIcon = tx.isSaving ? '🪴' : (isExpense ? '💸' : '💰');
+    final icon = primaryValue?.icon ?? firstTagIcon ?? fallbackIcon;
     final iconBgColor = primaryValue != null
         ? AppColors.fromHex(primaryValue.color).withValues(alpha: 0.12)
         : amountColor.withValues(alpha: 0.08);
@@ -1122,17 +1166,24 @@ class _TransactionTile extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             child: Row(
               children: [
-                // Leading icon — uses value color
-                Container(
-                  width: 44,
-                  height: 44,
-                  decoration: BoxDecoration(
-                    color: iconBgColor,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  alignment: Alignment.center,
-                  child: Text(icon, style: const TextStyle(fontSize: 20)),
-                ),
+                // Leading: first photo if available, otherwise the value/category icon.
+                tx.hasImages
+                    ? _ImageThumbnail(
+                        imagePath: tx.images.first,
+                        size: 44,
+                        borderRadius: 12,
+                        enableFullscreen: false,
+                      )
+                    : Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: iconBgColor,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        alignment: Alignment.center,
+                        child: Text(icon, style: const TextStyle(fontSize: 20)),
+                      ),
                 const SizedBox(width: 12),
 
                 // Title + meta
@@ -1143,7 +1194,9 @@ class _TransactionTile extends StatelessWidget {
                       Text(
                         tx.displayTitle.isNotEmpty
                             ? tx.displayTitle
-                            : (isExpense ? 'Expense' : 'Income'),
+                            : (tx.isSaving
+                                  ? 'Saving'
+                                  : (isExpense ? 'Expense' : 'Income')),
                         style: Theme.of(context).textTheme.titleSmall?.copyWith(
                           fontWeight: FontWeight.w600,
                         ),
@@ -1258,7 +1311,8 @@ class _TransactionTile extends StatelessWidget {
                     Text(
                       CurrencyUtils.formatSigned(
                         tx.totalAmount,
-                        isExpense: isExpense,
+                        // Savings reduce the active pool just like expenses.
+                        isExpense: isExpense || tx.isSaving,
                       ),
                       style: Theme.of(context).textTheme.titleSmall?.copyWith(
                         color: amountColor,
@@ -1274,7 +1328,9 @@ class _TransactionTile extends StatelessWidget {
                           Icon(
                             Icons.photo_camera_outlined,
                             size: 10,
-                            color: AppColors.textSecondary.withValues(alpha: 0.6),
+                            color: AppColors.textSecondary.withValues(
+                              alpha: 0.6,
+                            ),
                           ),
                           const SizedBox(width: 2),
                           Text(
@@ -1282,7 +1338,9 @@ class _TransactionTile extends StatelessWidget {
                             style: TextStyle(
                               fontSize: 10,
                               fontWeight: FontWeight.w600,
-                              color: AppColors.textSecondary.withValues(alpha: 0.6),
+                              color: AppColors.textSecondary.withValues(
+                                alpha: 0.6,
+                              ),
                             ),
                           ),
                           const SizedBox(width: 6),
@@ -1292,7 +1350,9 @@ class _TransactionTile extends StatelessWidget {
                           style: TextStyle(
                             fontSize: 10,
                             fontFamily: 'JetBrains Mono',
-                            color: AppColors.textSecondary.withValues(alpha: 0.55),
+                            color: AppColors.textSecondary.withValues(
+                              alpha: 0.55,
+                            ),
                           ),
                         ),
                       ],
@@ -1313,9 +1373,17 @@ class _TransactionTile extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 class _ImageThumbnail extends ConsumerStatefulWidget {
-  const _ImageThumbnail({required this.imagePath});
+  const _ImageThumbnail({
+    required this.imagePath,
+    this.size = 32,
+    this.borderRadius = 6,
+    this.enableFullscreen = true,
+  });
 
   final String imagePath;
+  final double size;
+  final double borderRadius;
+  final bool enableFullscreen;
 
   @override
   ConsumerState<_ImageThumbnail> createState() => _ImageThumbnailState();
@@ -1338,28 +1406,30 @@ class _ImageThumbnailState extends ConsumerState<_ImageThumbnail> {
   @override
   Widget build(BuildContext context) {
     if (_file == null) {
-      return const SizedBox(
-        width: 32,
-        height: 32,
+      return SizedBox(
+        width: widget.size,
+        height: widget.size,
         child: Icon(
           Icons.image_outlined,
-          size: 14,
+          size: widget.size * 0.45,
           color: AppColors.textSecondary,
         ),
       );
     }
+    final image = ClipRRect(
+      borderRadius: BorderRadius.circular(widget.borderRadius),
+      child: Image.file(
+        _file!,
+        width: widget.size,
+        height: widget.size,
+        fit: BoxFit.cover,
+        cacheWidth: (widget.size * 2).round(),
+      ),
+    );
+    if (!widget.enableFullscreen) return image;
     return GestureDetector(
       onTap: () => _openFullscreen(context),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(6),
-        child: Image.file(
-          _file!,
-          width: 32,
-          height: 32,
-          fit: BoxFit.cover,
-          cacheWidth: 64,
-        ),
-      ),
+      child: image,
     );
   }
 

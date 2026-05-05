@@ -21,8 +21,12 @@ class TransactionModel {
   static const recordedStatus = 'recorded';
   static const pendingStatus = 'pending';
 
+  static const incomeType = 'income';
+  static const expenseType = 'expense';
+  static const savingType = 'saving';
+
   final String id;
-  final String type; // 'income' | 'expense'
+  final String type; // 'income' | 'expense' | 'saving'
   final DateTime date;
   final String status;
   final String? title;
@@ -41,6 +45,7 @@ class TransactionModel {
 
   bool get isExpense => type == 'expense';
   bool get isIncome => type == 'income';
+  bool get isSaving => type == 'saving';
   bool get isPending => status == pendingStatus;
   bool get isRecorded => status == recordedStatus;
   bool get isPendingReviewDue =>

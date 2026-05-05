@@ -4,6 +4,7 @@ import '../database/database_helper.dart';
 import '../database/tables.dart';
 import '../models/recurring_expense_model.dart';
 import '../models/recurring_expense_payment_model.dart';
+import '../models/recurring_payment_history_entry_model.dart';
 import '../models/transaction_item_model.dart';
 import '../models/transaction_model.dart';
 
@@ -60,11 +61,7 @@ class RecurringExpensesRepository {
   Future<void> delete(String id) async {
     final db = await _db.database;
     // Payments cascade-delete via FK ON DELETE CASCADE
-    await db.delete(
-      Tables.recurringExpenses,
-      where: 'id = ?',
-      whereArgs: [id],
-    );
+    await db.delete(Tables.recurringExpenses, where: 'id = ?', whereArgs: [id]);
   }
 
   // ---------------------------------------------------------------------------
@@ -96,6 +93,32 @@ class RecurringExpensesRepository {
     );
     if (rows.isEmpty) return null;
     return RecurringExpensePaymentModel.fromMap(rows.first);
+  }
+
+  Future<List<RecurringPaymentHistoryEntryModel>> getPaymentHistory({
+    String? expenseId,
+  }) async {
+    final db = await _db.database;
+    final rows = await db.rawQuery('''
+      SELECT
+        rep.id AS payment_id,
+        rep.recurring_expense_id,
+        rep.month,
+        rep.transaction_id,
+        rep.paid_at,
+        re.name AS expense_name,
+        re.amount,
+        re.category,
+        re.value_id,
+        re.due_day,
+        re.pay_type
+      FROM ${Tables.recurringExpensePayments} rep
+      JOIN ${Tables.recurringExpenses} re
+        ON re.id = rep.recurring_expense_id
+      ${expenseId == null ? '' : 'WHERE rep.recurring_expense_id = ?'}
+      ORDER BY rep.month DESC, rep.paid_at DESC, lower(re.name) ASC
+      ''', expenseId == null ? null : [expenseId]);
+    return rows.map(RecurringPaymentHistoryEntryModel.fromMap).toList();
   }
 
   /// Records a payment AND inserts a real transaction atomically.

@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:archive/archive.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:googleapis/drive/v3.dart' as drive;
@@ -12,7 +14,9 @@ import 'package:sqflite/sqflite.dart';
 
 import '../data/database/database_helper.dart';
 import '../data/database/tables.dart';
+import '../data/database/tag_rename.dart';
 import '../providers/database_provider.dart';
+import 'google_oauth_config.dart';
 
 // ---------------------------------------------------------------------------
 // Authenticated HTTP client for Google APIs
@@ -49,6 +53,16 @@ class BackupInfo {
   final int? size;
 }
 
+class GoogleDriveAuthException implements Exception {
+  GoogleDriveAuthException(this.message, {this.code});
+
+  final String message;
+  final String? code;
+
+  @override
+  String toString() => message;
+}
+
 // ---------------------------------------------------------------------------
 // Google Drive Service
 // ---------------------------------------------------------------------------
@@ -62,13 +76,20 @@ class GoogleDriveService {
   static const _imageDir = 'transaction_images';
 
   final GoogleSignIn _googleSignIn = GoogleSignIn(
+    clientId: GoogleOAuthConfig.iosClientId,
+    serverClientId: GoogleOAuthConfig.serverClientId,
     scopes: [drive.DriveApi.driveFileScope],
   );
 
   // ── Auth ──────────────────────────────────────────────────────────────────
 
   Future<GoogleSignInAccount?> signIn() async {
-    return _googleSignIn.signIn();
+    _assertPlatformSetup();
+    try {
+      return await _googleSignIn.signIn();
+    } on PlatformException catch (e) {
+      throw _mapAuthError(e);
+    }
   }
 
   Future<void> signOut() async {
@@ -78,12 +99,66 @@ class GoogleDriveService {
   bool get isSignedIn => _googleSignIn.currentUser != null;
 
   Future<drive.DriveApi?> _getDriveApi() async {
-    final account =
-        _googleSignIn.currentUser ?? await _googleSignIn.signInSilently();
-    if (account == null) return null;
-    final authHeaders = await account.authHeaders;
-    final client = _GoogleAuthClient(authHeaders);
-    return drive.DriveApi(client);
+    _assertPlatformSetup();
+    try {
+      final account =
+          _googleSignIn.currentUser ?? await _googleSignIn.signInSilently();
+      if (account == null) return null;
+      final authHeaders = await account.authHeaders;
+      final client = _GoogleAuthClient(authHeaders);
+      return drive.DriveApi(client);
+    } on PlatformException catch (e) {
+      throw _mapAuthError(e);
+    }
+  }
+
+  void _assertPlatformSetup() {
+    if (GoogleOAuthConfig.requiresIosClientId &&
+        GoogleOAuthConfig.iosClientId == null) {
+      throw GoogleDriveAuthException(
+        'Google Sign-In is not configured for iOS. Add GOOGLE_IOS_CLIENT_ID and the matching URL scheme before using backup.',
+      );
+    }
+  }
+
+  GoogleDriveAuthException _mapAuthError(PlatformException e) {
+    final raw = '${e.message ?? ''} ${e.details ?? ''}'.toLowerCase();
+
+    if (defaultTargetPlatform == TargetPlatform.android &&
+        e.code == GoogleSignIn.kSignInFailedError &&
+        raw.contains('apiexception: 10')) {
+      return GoogleDriveAuthException(
+        'Google Sign-In OAuth is misconfigured for Android. Register package '
+        '${GoogleOAuthConfig.androidPackageName} with the SHA-1 of the signing key '
+        'you are using, enable Google Drive API, and provide '
+        'GOOGLE_SERVER_CLIENT_ID when running the app.',
+        code: e.code,
+      );
+    }
+
+    if (e.code == GoogleSignIn.kNetworkError) {
+      return GoogleDriveAuthException(
+        'Google Sign-In could not reach Google. Check the network connection and try again.',
+        code: e.code,
+      );
+    }
+
+    if (e.code == GoogleSignIn.kSignInRequiredError) {
+      return GoogleDriveAuthException(
+        'Please sign in to Google before using backup or restore.',
+        code: e.code,
+      );
+    }
+
+    final message = e.message?.trim();
+    if (message != null && message.isNotEmpty) {
+      return GoogleDriveAuthException(message, code: e.code);
+    }
+
+    return GoogleDriveAuthException(
+      'Google Sign-In failed with code ${e.code}.',
+      code: e.code,
+    );
   }
 
   // ── Backup ────────────────────────────────────────────────────────────────
@@ -212,23 +287,12 @@ class GoogleDriveService {
   Future<Map<String, dynamic>> _exportAllTables() async {
     final db = await _dbHelper.database;
 
-    final tables = [
-      Tables.userValues,
-      Tables.valuesPlan,
-      Tables.goals,
-      Tables.transactions,
-      Tables.transactionItems,
-      Tables.journal,
-      Tables.settings,
-      Tables.aiReflections,
-    ];
-
     final data = <String, dynamic>{};
-    for (final table in tables) {
+    for (final table in Tables.backupTables) {
       final rows = await db.query(table);
       data[table] = rows;
     }
-    data['_version'] = 4; // DB schema version
+    data['_version'] = DatabaseHelper.dbVersion;
     data['_exportedAt'] = DateTime.now().toIso8601String();
 
     return data;
@@ -288,33 +352,12 @@ class GoogleDriveService {
     try {
       await db.transaction((txn) async {
         // Clear all tables
-        final tables = [
-          Tables.aiReflections,
-          Tables.journal,
-          Tables.transactionItems,
-          Tables.transactions,
-          Tables.goals,
-          Tables.valuesPlan,
-          Tables.userValues,
-          Tables.settings,
-        ];
-        for (final table in tables) {
+        for (final table in Tables.restoreDeleteOrder) {
           await txn.delete(table);
         }
 
         // Insert in dependency order
-        final insertOrder = [
-          Tables.userValues,
-          Tables.valuesPlan,
-          Tables.goals,
-          Tables.transactions,
-          Tables.transactionItems,
-          Tables.journal,
-          Tables.settings,
-          Tables.aiReflections,
-        ];
-
-        for (final table in insertOrder) {
+        for (final table in Tables.restoreInsertOrder) {
           final rows = data[table];
           if (rows == null) continue;
           for (final row in (rows as List)) {
@@ -325,9 +368,40 @@ class GoogleDriveService {
             );
           }
         }
+
+        await _restoreLegacyTransactionImages(txn);
+        await renameLegacyTags(txn);
       });
     } finally {
       await db.execute('PRAGMA foreign_keys = ON');
+    }
+  }
+
+  Future<void> _restoreLegacyTransactionImages(DatabaseExecutor db) async {
+    final legacyRows = await db.rawQuery('''
+      SELECT t.id, t.image_path, t.created_at
+      FROM ${Tables.transactions} t
+      WHERE t.image_path IS NOT NULL
+        AND NOT EXISTS (
+          SELECT 1
+          FROM ${Tables.transactionImages} ti
+          WHERE ti.transaction_id = t.id
+        )
+      ''');
+
+    for (final row in legacyRows) {
+      final txId = row['id'] as String?;
+      final imagePath = row['image_path'] as String?;
+      if (txId == null || imagePath == null || imagePath.isEmpty) continue;
+
+      await db.insert(Tables.transactionImages, {
+        'id': '${txId}_img_0',
+        'transaction_id': txId,
+        'image_path': imagePath,
+        'sort_order': 0,
+        'created_at':
+            row['created_at'] as String? ?? DateTime.now().toIso8601String(),
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
     }
   }
 

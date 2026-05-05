@@ -72,12 +72,42 @@ flutter run -d ios
 
 ### Environment Setup (optional)
 
-For AI reflection and Google Drive backup, you need API keys:
+For AI reflection and Google Drive backup, you need API keys or OAuth client IDs:
 
 - **Gemini API key** — enter it in the app under Settings → AI Reflection
-- **Google Drive** — sign in with Google directly inside the app under Settings → Data
+- **Google Drive backup** — requires Google OAuth setup for the app build
 
-No `.env` files or build-time secrets are needed. All credentials are entered and stored on-device by the user.
+Gemini is entered and stored on-device by the user. Google Sign-In does not use a secret here, but it does require correct OAuth client configuration.
+
+### Google Drive Backup Setup
+
+If Android sign-in fails with `ApiException: 10`, the app's OAuth identity does not match the package name or signing key being used.
+
+1. In Google Cloud Console or Firebase, enable the **Google Drive API**.
+2. Complete the **OAuth consent screen** for the project.
+3. Create an **Android OAuth client** for package `com.debbie.debbie`.
+4. Add the SHA-1 for the keystore you use to run the app. For the default debug keystore, you can print it with:
+
+```bash
+keytool -list -v -alias androiddebugkey -keystore ~/.android/debug.keystore -storepass android -keypass android | rg SHA1
+```
+
+5. Create a **Web OAuth client** and pass its client ID when running Flutter:
+
+```bash
+flutter run \
+  --dart-define=GOOGLE_SERVER_CLIENT_ID=YOUR_WEB_CLIENT_ID.apps.googleusercontent.com
+```
+
+6. For iOS, also create an **iOS OAuth client**, pass it at runtime, and add the matching URL scheme in `Info.plist`:
+
+```bash
+flutter run \
+  --dart-define=GOOGLE_SERVER_CLIENT_ID=YOUR_WEB_CLIENT_ID.apps.googleusercontent.com \
+  --dart-define=GOOGLE_IOS_CLIENT_ID=YOUR_IOS_CLIENT_ID.apps.googleusercontent.com
+```
+
+Google Drive backup can only work after that OAuth setup is correct.
 
 ---
 

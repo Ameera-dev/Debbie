@@ -1,20 +1,27 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 
 import '../../../app/theme.dart';
 import '../../../data/models/goal_model.dart';
 import '../../../data/models/value_model.dart';
-import '../../../shared/utils/id_generator.dart';
+import '../../../providers/daily_intentions_provider.dart';
 import '../../../providers/database_provider.dart';
 import '../../../providers/goals_provider.dart';
+import '../../../providers/journal_provider.dart';
+import '../../../providers/mindfulness_provider.dart';
+import '../../../providers/recurring_provider.dart';
 import '../../../providers/settings_provider.dart';
+import '../../../providers/transactions_provider.dart';
 import '../../../providers/values_provider.dart';
+import '../../../providers/weekly_budget_provider.dart';
 import '../../../services/export_service.dart';
 import '../../../services/google_drive_service.dart';
 import '../../../shared/constants/strings.dart';
 import '../../../shared/utils/currency.dart';
+import '../../../shared/utils/id_generator.dart';
 import '../../../shared/widgets/tide.dart';
 
 class SettingsScreen extends ConsumerStatefulWidget {
@@ -42,6 +49,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final isConnected = googleEmail != null && googleEmail.isNotEmpty;
     final autoBackup = ref.watch(autoBackupProvider).valueOrNull ?? false;
     final lastBackup = ref.watch(lastBackupDateProvider).valueOrNull;
+    final appVersion = ref.watch(appVersionProvider).valueOrNull ?? '...';
     final coolingOffThreshold =
         ref.watch(coolingOffThresholdProvider).valueOrNull ?? 500000;
     final goals = ref.watch(goalsProvider).valueOrNull ?? const <GoalModel>[];
@@ -385,11 +393,11 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
               subtitle: const Text(AppStrings.madeWithIntention),
               leading: const Text('🌱', style: TextStyle(fontSize: 24)),
             ),
-            const ListTile(
-              title: Text('Version'),
+            ListTile(
+              title: const Text('Version'),
               trailing: Text(
-                '1.0.0',
-                style: TextStyle(color: AppColors.textSecondary),
+                appVersion,
+                style: const TextStyle(color: AppColors.textSecondary),
               ),
             ),
           ],
@@ -492,13 +500,15 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       case 'edit':
         await _showGoalDialog(values: values, existing: goal);
       case 'complete':
-        await ref.read(goalsProvider.notifier).edit(
-          goal.copyWith(status: 'completed', completedAt: DateTime.now()),
-        );
+        await ref
+            .read(goalsProvider.notifier)
+            .edit(
+              goal.copyWith(status: 'completed', completedAt: DateTime.now()),
+            );
       case 'reactivate':
-        await ref.read(goalsProvider.notifier).edit(
-          goal.copyWith(status: 'active', clearCompletedAt: true),
-        );
+        await ref
+            .read(goalsProvider.notifier)
+            .edit(goal.copyWith(status: 'active', clearCompletedAt: true));
       case 'delete':
         await _confirmDeleteGoal(goal);
     }
@@ -619,26 +629,30 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     final target = int.tryParse(targetController.text.trim());
 
     if (existing == null) {
-      await ref.read(goalsProvider.notifier).add(
-        GoalModel(
-          id: IdGenerator.generate(),
-          title: title,
-          valueId: selectedValueId,
-          targetAmount: target,
-          currentAmount: 0,
-          status: 'active',
-          createdAt: DateTime.now(),
-        ),
-      );
+      await ref
+          .read(goalsProvider.notifier)
+          .add(
+            GoalModel(
+              id: IdGenerator.generate(),
+              title: title,
+              valueId: selectedValueId,
+              targetAmount: target,
+              currentAmount: 0,
+              status: 'active',
+              createdAt: DateTime.now(),
+            ),
+          );
     } else {
-      await ref.read(goalsProvider.notifier).edit(
-        existing.copyWith(
-          title: title,
-          valueId: selectedValueId,
-          targetAmount: target,
-          clearTargetAmount: target == null,
-        ),
-      );
+      await ref
+          .read(goalsProvider.notifier)
+          .edit(
+            existing.copyWith(
+              title: title,
+              valueId: selectedValueId,
+              targetAmount: target,
+              clearTargetAmount: target == null,
+            ),
+          );
     }
   }
 
@@ -650,8 +664,37 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       final account = await driveService.signIn();
       if (account != null) {
         await ref.read(googleEmailProvider.notifier).setEmail(account.email);
+      } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Sign-in was canceled or did not complete. Check Google OAuth setup if this keeps happening.',
+            ),
+          ),
+        );
+      }
+    } on GoogleDriveAuthException catch (e) {
+      debugPrint('Google sign-in failed: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Sign-in failed: $e')));
+      }
+    } on PlatformException catch (e) {
+      debugPrint(
+        'Google sign-in failed: code=${e.code}, message=${e.message}, details=${e.details}',
+      );
+      if (mounted) {
+        final message = [
+          e.code,
+          if (e.message != null && e.message!.isNotEmpty) e.message,
+        ].join(': ');
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Sign-in failed: $message')));
       }
     } catch (e) {
+      debugPrint('Google sign-in failed: $e');
       if (mounted) {
         ScaffoldMessenger.of(
           context,
@@ -719,36 +762,12 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
       if (!mounted) return;
 
-      final selected = await showDialog<BackupInfo>(
+      final selected = await showModalBottomSheet<BackupInfo>(
         context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text(AppStrings.selectBackup),
-          content: SizedBox(
-            width: double.maxFinite,
-            child: ListView.builder(
-              shrinkWrap: true,
-              itemCount: backups.length,
-              itemBuilder: (ctx, i) {
-                final b = backups[i];
-                final dateStr = DateFormat(
-                  'd MMM yyyy, HH:mm',
-                ).format(b.createdTime.toLocal());
-                final sizeStr = b.size != null ? _formatBytes(b.size!) : '';
-                return ListTile(
-                  title: Text(b.name),
-                  subtitle: Text('$dateStr  $sizeStr'),
-                  onTap: () => Navigator.of(ctx).pop(b),
-                );
-              },
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text(AppStrings.restoreCancel),
-            ),
-          ],
-        ),
+        isScrollControlled: true,
+        useSafeArea: true,
+        backgroundColor: Colors.transparent,
+        builder: (ctx) => _BackupPickerSheet(backups: backups),
       );
 
       if (selected == null || !mounted) return;
@@ -777,11 +796,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
 
       setState(() => _restoring = true);
       await driveService.restore(selected.id);
-
-      // Invalidate all providers to reload state
-      ref.invalidate(lastBackupDateProvider);
-      ref.invalidate(googleEmailProvider);
-      ref.invalidate(autoBackupProvider);
+      _invalidateRestoredState();
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -797,6 +812,48 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     } finally {
       if (mounted) setState(() => _restoring = false);
     }
+  }
+
+  void _invalidateRestoredState() {
+    ref.invalidate(onboardingCompleteProvider);
+    ref.invalidate(darkModeProvider);
+    ref.invalidate(monthlyIncomeProvider);
+    ref.invalidate(googleEmailProvider);
+    ref.invalidate(lastBackupDateProvider);
+    ref.invalidate(autoBackupProvider);
+    ref.invalidate(aiReflectionEnabledProvider);
+    ref.invalidate(geminiApiKeyProvider);
+    ref.invalidate(coolingOffThresholdProvider);
+
+    ref.invalidate(valuesProvider);
+    ref.invalidate(valuesPlanProvider);
+    ref.invalidate(currentMonthPlanProvider);
+    ref.invalidate(goalsProvider);
+    ref.invalidate(activeGoalsProvider);
+    ref.invalidate(transactionsProvider);
+    ref.invalidate(pendingTransactionsProvider);
+    ref.invalidate(duePendingTransactionsProvider);
+    ref.invalidate(currentMonthTransactionsProvider);
+    ref.invalidate(monthlyIncomeAmountProvider);
+    ref.invalidate(monthlyExpenseAmountProvider);
+    ref.invalidate(allTimeIncomeProvider);
+    ref.invalidate(allTimeExpenseProvider);
+    ref.invalidate(availableBalanceProvider);
+    ref.invalidate(spendingByValueProvider);
+    ref.invalidate(todayTransactionsProvider);
+    ref.invalidate(spendingStreakProvider);
+    ref.invalidate(journalProvider);
+    ref.invalidate(latestJournalEntryProvider);
+    ref.invalidate(dailyIntentionsProvider);
+    ref.invalidate(todayIntentionProvider);
+    ref.invalidate(yesterdayIntentionProvider);
+    ref.invalidate(weeklyBudgetPlansProvider);
+    ref.invalidate(weeklyPerformanceHistoryProvider);
+    ref.invalidate(recurringExpensesProvider);
+    ref.invalidate(recurringPaymentsProvider);
+    ref.invalidate(recurringPaymentHistoryProvider);
+    ref.invalidate(recurringMonthSummaryProvider);
+    ref.invalidate(awarenessStreakProvider);
   }
 
   // ── API Key Dialog ────────────────────────────────────────────────────────
@@ -881,6 +938,403 @@ class _ImageStorageInfo extends ConsumerWidget {
           ),
         );
       },
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Backup picker
+// ---------------------------------------------------------------------------
+
+class _BackupPickerSheet extends StatefulWidget {
+  const _BackupPickerSheet({required this.backups});
+
+  final List<BackupInfo> backups;
+
+  @override
+  State<_BackupPickerSheet> createState() => _BackupPickerSheetState();
+}
+
+class _BackupPickerSheetState extends State<_BackupPickerSheet> {
+  late final TextEditingController _searchController;
+  String _query = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  List<BackupInfo> get _filteredBackups {
+    final query = _query.trim().toLowerCase();
+    if (query.isEmpty) return widget.backups;
+
+    return widget.backups.where((backup) {
+      final dateLabel = _formatDate(backup.createdTime).toLowerCase();
+      final sizeLabel = backup.size != null
+          ? _SettingsScreenState._formatBytes(backup.size!).toLowerCase()
+          : '';
+      return backup.name.toLowerCase().contains(query) ||
+          dateLabel.contains(query) ||
+          sizeLabel.contains(query);
+    }).toList();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final filtered = _filteredBackups;
+    final theme = Theme.of(context);
+
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: widget.backups.length > 8 ? 0.78 : 0.6,
+      minChildSize: 0.38,
+      maxChildSize: 0.92,
+      builder: (context, scrollController) {
+        return Container(
+          decoration: BoxDecoration(
+            color: theme.cardColor,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.shadow.withValues(alpha: 0.14),
+                blurRadius: 24,
+                offset: const Offset(0, -8),
+              ),
+            ],
+          ),
+          child: SafeArea(
+            top: false,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(
+                20,
+                12,
+                20,
+                MediaQuery.of(context).viewInsets.bottom + 16,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 42,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: AppColors.divider,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const TideSurfaceIcon(
+                        icon: Icons.restore_rounded,
+                        color: AppColors.primary,
+                        backgroundColor: Color(0x143E6C7E),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const TideEyebrow(label: 'Google Drive Restore'),
+                            const SizedBox(height: 6),
+                            Text(
+                              AppStrings.selectBackup,
+                              style: theme.textTheme.titleLarge,
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              filtered.length == widget.backups.length
+                                  ? '${widget.backups.length} backups available'
+                                  : '${filtered.length} of ${widget.backups.length} backups shown',
+                              style: theme.textTheme.bodyMedium?.copyWith(
+                                color: AppColors.textSecondary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      if (widget.backups.isNotEmpty)
+                        TidePill(
+                          label:
+                              'Latest ${_formatShortDate(widget.backups.first.createdTime)}',
+                          color: AppColors.primaryDeep,
+                          backgroundColor: AppColors.primary.withValues(
+                            alpha: 0.10,
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: _searchController,
+                    textInputAction: TextInputAction.search,
+                    decoration: InputDecoration(
+                      prefixIcon: const Icon(Icons.search_rounded),
+                      hintText: 'Search backup name, date, or size',
+                      suffixIcon: _query.isEmpty
+                          ? null
+                          : IconButton(
+                              onPressed: () {
+                                _searchController.clear();
+                                setState(() => _query = '');
+                              },
+                              icon: const Icon(Icons.close_rounded),
+                            ),
+                    ),
+                    onChanged: (value) {
+                      setState(() => _query = value);
+                    },
+                  ),
+                  const SizedBox(height: 14),
+                  Expanded(
+                    child: filtered.isEmpty
+                        ? _BackupEmptyState(query: _query)
+                        : Scrollbar(
+                            controller: scrollController,
+                            thumbVisibility: filtered.length > 6,
+                            child: ListView.separated(
+                              controller: scrollController,
+                              physics: const BouncingScrollPhysics(),
+                              itemCount: filtered.length,
+                              separatorBuilder: (_, _) =>
+                                  const SizedBox(height: 10),
+                              itemBuilder: (context, index) {
+                                final backup = filtered[index];
+                                final isLatest = identical(
+                                  backup,
+                                  widget.backups.first,
+                                );
+                                return _BackupListTile(
+                                  backup: backup,
+                                  isLatest: isLatest,
+                                  onTap: () =>
+                                      Navigator.of(context).pop(backup),
+                                );
+                              },
+                            ),
+                          ),
+                  ),
+                  const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text(AppStrings.restoreCancel),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  static String _formatDate(DateTime date) {
+    return DateFormat('d MMM yyyy, HH:mm').format(date.toLocal());
+  }
+
+  static String _formatShortDate(DateTime date) {
+    return DateFormat('d MMM').format(date.toLocal());
+  }
+}
+
+class _BackupListTile extends StatelessWidget {
+  const _BackupListTile({
+    required this.backup,
+    required this.onTap,
+    required this.isLatest,
+  });
+
+  final BackupInfo backup;
+  final VoidCallback onTap;
+  final bool isLatest;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final dateLabel = _BackupPickerSheetState._formatDate(backup.createdTime);
+    final sizeLabel = backup.size != null
+        ? _SettingsScreenState._formatBytes(backup.size!)
+        : 'Unknown size';
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(22),
+        onTap: onTap,
+        child: Ink(
+          decoration: BoxDecoration(
+            color: AppColors.surfaceWarm,
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: AppColors.divider),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+            child: Row(
+              children: [
+                TideSurfaceIcon(
+                  icon: isLatest
+                      ? Icons.history_toggle_off_rounded
+                      : Icons.archive_outlined,
+                  color: isLatest ? AppColors.primary : AppColors.textSoft,
+                  backgroundColor: isLatest
+                      ? AppColors.primary.withValues(alpha: 0.10)
+                      : AppColors.surface,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              backup.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.titleMedium,
+                            ),
+                          ),
+                          if (isLatest) ...[
+                            const SizedBox(width: 8),
+                            TidePill(
+                              label: 'Latest',
+                              color: AppColors.primaryDeep,
+                              backgroundColor: AppColors.primary.withValues(
+                                alpha: 0.10,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        dateLabel,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          _BackupMetaChip(
+                            icon: Icons.storage_rounded,
+                            label: sizeLabel,
+                          ),
+                          _BackupMetaChip(
+                            icon: Icons.cloud_done_outlined,
+                            label: 'Ready to restore',
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+                const Icon(
+                  Icons.chevron_right_rounded,
+                  color: AppColors.textSecondary,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BackupMetaChip extends StatelessWidget {
+  const _BackupMetaChip({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: AppColors.divider),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: AppColors.textSecondary),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: AppColors.textSecondary,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BackupEmptyState extends StatelessWidget {
+  const _BackupEmptyState({required this.query});
+
+  final String query;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 64,
+              height: 64,
+              decoration: BoxDecoration(
+                color: AppColors.surfaceWarm,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: AppColors.divider),
+              ),
+              child: const Icon(
+                Icons.search_off_rounded,
+                color: AppColors.textSecondary,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'No backups match "${query.trim()}".',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Try a different file name, date, or size.',
+              textAlign: TextAlign.center,
+              style: Theme.of(
+                context,
+              ).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

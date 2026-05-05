@@ -76,4 +76,24 @@ class GoalsRepository {
       whereArgs: [id],
     );
   }
+
+  /// Set current_amount for every goal to its derived savings total.
+  /// Goals with no saving transactions are reset to 0.
+  Future<void> syncCurrentAmountsFromSavings(
+    Map<String, int> savingsByGoal,
+  ) async {
+    final db = await _db.database;
+    await db.transaction((txn) async {
+      // Zero out all goals first so deletions/edits flow through.
+      await txn.update(Tables.goals, {'current_amount': 0});
+      for (final entry in savingsByGoal.entries) {
+        await txn.update(
+          Tables.goals,
+          {'current_amount': entry.value},
+          where: 'id = ?',
+          whereArgs: [entry.key],
+        );
+      }
+    });
+  }
 }

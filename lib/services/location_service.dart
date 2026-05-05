@@ -1,6 +1,9 @@
+import 'dart:convert';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:http/http.dart' as http;
 
 class LocationData {
   const LocationData({
@@ -57,6 +60,68 @@ class LocationService {
     } catch (_) {
       return (data: null, failure: LocationFailure.timeout);
     }
+  }
+
+  /// Search for places by name/address using OpenStreetMap's Nominatim.
+  /// This indexes points of interest (shops, restaurants, landmarks) which
+  /// the platform-native geocoder typically misses.
+  Future<List<LocationData>> searchPlaces(String query, {int limit = 8}) async {
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) return const <LocationData>[];
+
+    final uri = Uri.https('nominatim.openstreetmap.org', '/search', {
+      'q': trimmed,
+      'format': 'jsonv2',
+      'limit': '$limit',
+      'addressdetails': '1',
+    });
+
+    try {
+      final res = await http.get(
+        uri,
+        // Nominatim's usage policy requires an identifying User-Agent.
+        headers: const {
+          'User-Agent': 'Debbie/1.0 (mindful-money-companion)',
+          'Accept-Language': 'id,en',
+        },
+      ).timeout(const Duration(seconds: 10));
+
+      if (res.statusCode != 200) return const <LocationData>[];
+
+      final decoded = jsonDecode(res.body);
+      if (decoded is! List) return const <LocationData>[];
+
+      final results = <LocationData>[];
+      for (final entry in decoded) {
+        if (entry is! Map<String, dynamic>) continue;
+        final lat = double.tryParse(entry['lat']?.toString() ?? '');
+        final lon = double.tryParse(entry['lon']?.toString() ?? '');
+        if (lat == null || lon == null) continue;
+
+        final displayName = entry['display_name']?.toString() ?? trimmed;
+        results.add(
+          LocationData(
+            latitude: lat,
+            longitude: lon,
+            label: _shortenDisplayName(displayName),
+          ),
+        );
+      }
+      return results;
+    } catch (_) {
+      return const <LocationData>[];
+    }
+  }
+
+  String _shortenDisplayName(String displayName) {
+    final parts = displayName
+        .split(',')
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+    if (parts.isEmpty) return displayName;
+    // Keep the venue name + up to 2 locality parts so it stays readable.
+    return parts.take(3).join(', ');
   }
 
   Future<String> _reverseGeocode(double lat, double lng) async {

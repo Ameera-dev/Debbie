@@ -1,56 +1,31 @@
-
-<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
   <defs>
-    <clipPath id="clipC"><rect width="1024" height="1024" rx="228" ry="228"/></clipPath>
-    <linearGradient id="bgC" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#FBF6EC"/>
-      <stop offset="1" stop-color="#E8DDC6"/>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FBF6EC"></stop>
+      <stop offset="1" stop-color="#EBDFC4"></stop>
     </linearGradient>
-    <radialGradient id="pearlC" cx=".4" cy=".3" r=".7">
-      <stop offset="0" stop-color="#FFFDF6"/>
-      <stop offset="1" stop-color="#C9A462"/>
+    <linearGradient id="wave" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4A7C8F"></stop>
+      <stop offset="1" stop-color="#294956"></stop>
+    </linearGradient>
+    <radialGradient id="sun" cx=".5" cy=".5" r=".5">
+      <stop offset="0" stop-color="#F2D9A0"></stop>
+      <stop offset="1" stop-color="#C9A462"></stop>
     </radialGradient>
+    <clipPath id="wave-mask">
+      <rect x="64" y="64" width="896" height="896" rx="224" ry="224"></rect>
+    </clipPath>
   </defs>
-  <g clip-path="url(#clipC)">
-    <rect width="1024" height="1024" fill="url(#bgC)"/>
-    <g style="mix-blend-mode: multiply;">
-      <g transform="translate(512 520) rotate(0)">
-        <g transform="translate(0 -118)">
-          <path d="M 0 -336 C 97.2 -235.2, 113.4 84, 0 194.88 C -113.4 84, -97.2 -235.2, 0 -336 Z" fill="#3E6C7E" opacity="0.55"/>
-        </g>
-      </g>
-      <g transform="translate(512 520) rotate(51.42857142857142)">
-        <g transform="translate(0 -118)">
-          <path d="M 0 -336 C 97.2 -235.2, 113.4 84, 0 194.88 C -113.4 84, -97.2 -235.2, 0 -336 Z" fill="#3E6C7E" opacity="0.82"/>
-        </g>
-      </g>
-      <g transform="translate(512 520) rotate(102.85714285714285)">
-        <g transform="translate(0 -118)">
-          <path d="M 0 -336 C 97.2 -235.2, 113.4 84, 0 194.88 C -113.4 84, -97.2 -235.2, 0 -336 Z" fill="#3E6C7E" opacity="0.89"/>
-        </g>
-      </g>
-      <g transform="translate(512 520) rotate(154.28571428571428)">
-        <g transform="translate(0 -118)">
-          <path d="M 0 -336 C 97.2 -235.2, 113.4 84, 0 194.88 C -113.4 84, -97.2 -235.2, 0 -336 Z" fill="#3E6C7E" opacity="0.70"/>
-        </g>
-      </g>
-      <g transform="translate(512 520) rotate(205.7142857142857)">
-        <g transform="translate(0 -118)">
-          <path d="M 0 -336 C 97.2 -235.2, 113.4 84, 0 194.88 C -113.4 84, -97.2 -235.2, 0 -336 Z" fill="#3E6C7E" opacity="0.40"/>
-        </g>
-      </g>
-      <g transform="translate(512 520) rotate(257.14285714285717)">
-        <g transform="translate(0 -118)">
-          <path d="M 0 -336 C 97.2 -235.2, 113.4 84, 0 194.88 C -113.4 84, -97.2 -235.2, 0 -336 Z" fill="#3E6C7E" opacity="0.21"/>
-        </g>
-      </g>
-      <g transform="translate(512 520) rotate(308.57142857142856)">
-        <g transform="translate(0 -118)">
-          <path d="M 0 -336 C 97.2 -235.2, 113.4 84, 0 194.88 C -113.4 84, -97.2 -235.2, 0 -336 Z" fill="#3E6C7E" opacity="0.28"/>
-        </g>
-      </g></g>
-    <!-- pearl center -->
-    <circle cx="512" cy="520" r="74" fill="url(#pearlC)"/>
-    <circle cx="492" cy="498" r="18" fill="#fff" opacity=".65"/>
+
+  <rect width="1024" height="1024" fill="url(#bg)"></rect>
+  <g transform="translate(512 512) scale(0.9) translate(-512 -512)">
+    <circle cx="512" cy="400" r="150" fill="url(#sun)"></circle>
+
+    <g clip-path="url(#wave-mask)">
+      <path d="M -50 720 Q 200 600 460 700 T 1080 680 L 1080 1100 L -50 1100 Z" fill="#6B8EAE" opacity="0.65"></path>
+      <path d="M -50 780 Q 250 660 520 760 T 1080 740 L 1080 1100 L -50 1100 Z" fill="url(#wave)"></path>
+      <path d="M -50 860 Q 220 760 500 840 T 1080 830 L 1080 1100 L -50 1100 Z" fill="#294956"></path>
+    </g>
   </g>
 </svg>

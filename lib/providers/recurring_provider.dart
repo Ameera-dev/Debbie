@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../data/models/recurring_expense_model.dart';
 import '../data/models/recurring_expense_payment_model.dart';
+import '../data/models/recurring_payment_history_entry_model.dart';
 import '../data/models/transaction_item_model.dart';
 import '../data/models/transaction_model.dart';
 import '../shared/utils/date_utils.dart';
@@ -13,10 +14,11 @@ import 'transactions_provider.dart';
 // Recurring expenses list
 // ---------------------------------------------------------------------------
 
-final recurringExpensesProvider = AsyncNotifierProvider<
-  RecurringExpensesNotifier,
-  List<RecurringExpenseModel>
->(RecurringExpensesNotifier.new);
+final recurringExpensesProvider =
+    AsyncNotifierProvider<
+      RecurringExpensesNotifier,
+      List<RecurringExpenseModel>
+    >(RecurringExpensesNotifier.new);
 
 class RecurringExpensesNotifier
     extends AsyncNotifier<List<RecurringExpenseModel>> {
@@ -40,11 +42,14 @@ class RecurringExpensesNotifier
 
   Future<void> edit(RecurringExpenseModel expense) async {
     await ref.read(recurringExpensesRepositoryProvider).update(expense);
+    ref.invalidate(recurringPaymentHistoryProvider);
     await refresh();
   }
 
   Future<void> remove(String id) async {
     await ref.read(recurringExpensesRepositoryProvider).delete(id);
+    ref.invalidate(recurringPaymentsProvider);
+    ref.invalidate(recurringPaymentHistoryProvider);
     await refresh();
   }
 
@@ -91,6 +96,7 @@ class RecurringExpensesNotifier
 
     ref.invalidate(transactionsProvider);
     ref.invalidate(recurringPaymentsProvider);
+    ref.invalidate(recurringPaymentHistoryProvider);
     // recurringMonthSummaryProvider reacts automatically via ref.watch
   }
 
@@ -101,6 +107,7 @@ class RecurringExpensesNotifier
         .read(recurringExpensesRepositoryProvider)
         .deletePayment(expenseId, month);
     ref.invalidate(recurringPaymentsProvider);
+    ref.invalidate(recurringPaymentHistoryProvider);
   }
 }
 
@@ -108,14 +115,18 @@ class RecurringExpensesNotifier
 // Payments for current month
 // ---------------------------------------------------------------------------
 
-final recurringPaymentsProvider = FutureProvider<
-  List<RecurringExpensePaymentModel>
->((ref) {
-  final month = AppDateUtils.currentMonthKey();
-  return ref
-      .read(recurringExpensesRepositoryProvider)
-      .getPaymentsForMonth(month);
-});
+final recurringPaymentsProvider =
+    FutureProvider<List<RecurringExpensePaymentModel>>((ref) {
+      final month = AppDateUtils.currentMonthKey();
+      return ref
+          .read(recurringExpensesRepositoryProvider)
+          .getPaymentsForMonth(month);
+    });
+
+final recurringPaymentHistoryProvider =
+    FutureProvider<List<RecurringPaymentHistoryEntryModel>>((ref) {
+      return ref.read(recurringExpensesRepositoryProvider).getPaymentHistory();
+    });
 
 // ---------------------------------------------------------------------------
 // Month summary: total commitment, paid total, counts
