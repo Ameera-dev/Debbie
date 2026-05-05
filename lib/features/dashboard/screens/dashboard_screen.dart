@@ -50,6 +50,7 @@ class DashboardScreen extends ConsumerWidget {
     final allTimeExpenseAsync = ref.watch(allTimeExpenseProvider);
     final incomeAsync = ref.watch(monthlyIncomeAmountProvider);
     final expenseAsync = ref.watch(monthlyExpenseAmountProvider);
+    final savingAsync = ref.watch(monthlySavingAmountProvider);
     final spendingByValue = ref.watch(spendingByValueProvider);
     final planAsync = ref.watch(currentMonthPlanProvider);
     final goalsAsync = ref.watch(activeGoalsProvider);
@@ -66,6 +67,7 @@ class DashboardScreen extends ConsumerWidget {
     final values = valuesAsync.valueOrNull ?? <ValueModel>[];
     final income = incomeAsync.valueOrNull ?? 0;
     final expenses = expenseAsync.valueOrNull ?? 0;
+    final savings = savingAsync.valueOrNull ?? 0;
     final streak = awarenessStreak;
     final budget = budgetAsync.valueOrNull ?? income;
 
@@ -141,6 +143,7 @@ class DashboardScreen extends ConsumerWidget {
                   _MonthlyOverview(
                     income: income,
                     expenses: expenses,
+                    savings: savings,
                     budgetAsync: budgetAsync,
                   ),
                   const SizedBox(height: 16),
@@ -267,14 +270,9 @@ class _GreetingHeader extends StatelessWidget {
                 ],
               ),
             ),
-            const SizedBox(width: 12),
-            const TideSurfaceIcon(
-              icon: Icons.dark_mode_outlined,
-              backgroundColor: AppColors.surfaceWarm,
-            ),
             if (streak >= 2)
               Padding(
-                padding: const EdgeInsets.only(left: 10),
+                padding: const EdgeInsets.only(left: 12),
                 child: TidePill(
                   label: '$streak days aware',
                   backgroundColor: AppColors.secondary.withValues(alpha: 0.14),
@@ -289,7 +287,7 @@ class _GreetingHeader extends StatelessWidget {
   }
 }
 
-class _TideOverviewCard extends StatelessWidget {
+class _TideOverviewCard extends ConsumerWidget {
   const _TideOverviewCard({
     required this.values,
     required this.spendingByValue,
@@ -303,7 +301,8 @@ class _TideOverviewCard extends StatelessWidget {
   final int budget;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final visible = ref.watch(balanceVisibleProvider).valueOrNull ?? true;
     final availableBudget = budget > 0 ? budget : expenses;
     final remaining = availableBudget - expenses;
     final segments =
@@ -374,11 +373,31 @@ class _TideOverviewCard extends StatelessWidget {
                         fontWeight: FontWeight.w700,
                       ),
                     ),
+                    const SizedBox(width: 8),
+                    InkWell(
+                      onTap: () =>
+                          ref.read(balanceVisibleProvider.notifier).toggle(),
+                      borderRadius: BorderRadius.circular(20),
+                      child: Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.14),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          visible
+                              ? Icons.visibility_outlined
+                              : Icons.visibility_off_outlined,
+                          size: 14,
+                          color: Colors.white.withValues(alpha: 0.92),
+                        ),
+                      ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 14),
                 Text(
-                  CurrencyUtils.format(remaining),
+                  visible ? CurrencyUtils.format(remaining) : 'Rp ••••••',
                   style: GoogleFonts.lora(
                     fontSize: 38,
                     height: 1,
@@ -388,7 +407,9 @@ class _TideOverviewCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  '${CurrencyUtils.format(expenses)} spent of ${CurrencyUtils.format(availableBudget)} planned',
+                  visible
+                      ? '${CurrencyUtils.format(expenses)} spent of ${CurrencyUtils.format(availableBudget)} planned'
+                      : 'Amounts hidden',
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                     color: Colors.white.withValues(alpha: 0.84),
                   ),
@@ -482,7 +503,7 @@ class _WavePainter extends CustomPainter {
 // Today's focus — synthesized next step for the dashboard
 // ---------------------------------------------------------------------------
 
-class _TodayFocusCard extends StatelessWidget {
+class _TodayFocusCard extends ConsumerStatefulWidget {
   const _TodayFocusCard({
     required this.values,
     required this.allTransactions,
@@ -502,7 +523,50 @@ class _TodayFocusCard extends StatelessWidget {
   final int streak;
 
   @override
+  ConsumerState<_TodayFocusCard> createState() => _TodayFocusCardState();
+}
+
+class _TodayFocusCardState extends ConsumerState<_TodayFocusCard> {
+  bool _autoIntroChecked = false;
+
+  void _maybeAutoShowIntro() {
+    if (_autoIntroChecked) return;
+    final seen = ref.read(todayFocusIntroSeenProvider).valueOrNull;
+    if (seen == false) {
+      _autoIntroChecked = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _showIntro();
+      });
+    } else if (seen == true) {
+      _autoIntroChecked = true;
+    }
+  }
+
+  void _showIntro() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => const _TodayFocusIntroSheet(),
+    ).whenComplete(() {
+      ref.read(todayFocusIntroSeenProvider.notifier).markSeen();
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
+    // Watch so the auto-intro fires once the seen-flag is loaded.
+    ref.watch(todayFocusIntroSeenProvider);
+    _maybeAutoShowIntro();
+
+    final values = widget.values;
+    final allTransactions = widget.allTransactions;
+    final todayIntention = widget.todayIntention;
+    final duePendingTransactions = widget.duePendingTransactions;
+    final budget = widget.budget;
+    final expenses = widget.expenses;
+    final streak = widget.streak;
     final now = DateTime.now();
     final today = AppDateUtils.startOfDay(now);
     final daysInMonth = DateTime(now.year, now.month + 1, 0).day;
@@ -565,7 +629,7 @@ class _TodayFocusCard extends StatelessWidget {
                             style: Theme.of(context).textTheme.titleLarge,
                           ),
                         ),
-                        if (streak >= 2)
+                        if (streak >= 2) ...[
                           TidePill(
                             label: '$streak days',
                             color: AppColors.secondaryDeep,
@@ -573,6 +637,22 @@ class _TodayFocusCard extends StatelessWidget {
                               alpha: 0.14,
                             ),
                           ),
+                          const SizedBox(width: 4),
+                        ],
+                        InkWell(
+                          onTap: _showIntro,
+                          customBorder: const CircleBorder(),
+                          child: Padding(
+                            padding: const EdgeInsets.all(4),
+                            child: Icon(
+                              Icons.help_outline_rounded,
+                              size: 18,
+                              color: AppColors.textSecondary.withValues(
+                                alpha: 0.7,
+                              ),
+                            ),
+                          ),
+                        ),
                       ],
                     ),
                     const SizedBox(height: 4),
@@ -641,8 +721,8 @@ class _TodayFocusCard extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: _FocusSignal(
-                  label: 'Intention',
-                  value: selectedValue?.name ?? 'Unset',
+                  label: "Today's value",
+                  value: selectedValue?.name ?? 'Not set',
                   color: selectedValue == null
                       ? AppColors.textSecondary
                       : AppColors.fromHex(selectedValue.color),
@@ -717,7 +797,7 @@ class _TodayFocusCard extends StatelessWidget {
       return const _FocusStatus(
         title: 'Open day',
         message:
-            'No spending has landed today. When money moves, give it a clear reason.',
+            'No spending yet today. When you do spend, tag it to a value so it counts toward what matters.',
         icon: Icons.wb_sunny_outlined,
         color: AppColors.primary,
       );
@@ -726,7 +806,7 @@ class _TodayFocusCard extends StatelessWidget {
     return const _FocusStatus(
       title: 'Steady',
       message:
-          'The month is readable. Keep connecting each money moment to what it was really for.',
+          'You are on track this month. Keep tagging each spend to a value to see where your energy is flowing.',
       icon: Icons.explore_outlined,
       color: AppColors.primary,
     );
@@ -759,7 +839,7 @@ class _TodayFocusCard extends StatelessWidget {
       return const _FocusCta(
         label: 'Reflect',
         helper:
-            'No intention is set yet, so keep today’s spending easy to read.',
+            'Pick today\'s value in Reflect to give your spending a clear focus.',
         route: '/reflect',
         icon: Icons.lightbulb_outline,
       );
@@ -768,9 +848,250 @@ class _TodayFocusCard extends StatelessWidget {
     return const _FocusCta(
       label: 'Reflect',
       helper:
-          'Turn today’s pattern into a short weekly story when you are ready.',
+          'Open Reflect to turn today\'s pattern into a short weekly story.',
       route: '/reflect',
       icon: Icons.lightbulb_outline,
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Today's Focus walkthrough — explains the card to first-time users.
+// Auto-opens once on the first dashboard visit, available any time via
+// the `?` icon in the card header.
+// ---------------------------------------------------------------------------
+
+class _TodayFocusIntroSheet extends StatelessWidget {
+  const _TodayFocusIntroSheet();
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return DraggableScrollableSheet(
+      initialChildSize: 0.85,
+      minChildSize: 0.5,
+      maxChildSize: 0.95,
+      expand: false,
+      builder: (context, scrollController) {
+        return Container(
+          decoration: BoxDecoration(
+            color: isDark ? AppColors.darkSurface : AppColors.surface,
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+          ),
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(top: 12, bottom: 4),
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppColors.divider,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              Expanded(
+                child: ListView(
+                  controller: scrollController,
+                  padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+                  children: [
+                    Row(
+                      children: [
+                        TideSurfaceIcon(
+                          icon: Icons.explore_outlined,
+                          color: AppColors.primary,
+                          backgroundColor: AppColors.primary.withValues(
+                            alpha: 0.10,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                "What is Today's focus?",
+                                style: GoogleFonts.lora(
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w600,
+                                  color: isDark
+                                      ? AppColors.darkTextPrimary
+                                      : AppColors.textPrimary,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'A daily snapshot to keep your spending intentional.',
+                                style: Theme.of(context).textTheme.bodyMedium
+                                    ?.copyWith(
+                                      color: AppColors.textSecondary,
+                                      height: 1.4,
+                                    ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 22),
+                    const _IntroSection(
+                      icon: Icons.auto_awesome_rounded,
+                      color: AppColors.primary,
+                      title: 'The big word at the top',
+                      body:
+                          'One word that sums up your day so far — like "Steady", "Watch pace", or "Aligned". '
+                          'It changes based on how today is going. Read this first to know if anything needs your attention.',
+                    ),
+                    const SizedBox(height: 18),
+                    const _IntroSection(
+                      icon: Icons.speed_rounded,
+                      color: AppColors.expense,
+                      title: 'Pace',
+                      body:
+                          'How much of your monthly money you have spent so far, as a percentage. '
+                          'If "Pace" is bigger than how far through the month you are, you are spending faster than usual — '
+                          'a gentle nudge to slow down.',
+                    ),
+                    const SizedBox(height: 18),
+                    const _IntroSection(
+                      icon: Icons.today_rounded,
+                      color: AppColors.expense,
+                      title: 'Today',
+                      body:
+                          'How much you have spent just today. Tap the + button at the bottom to add a new spend, '
+                          'income, or saving. Each one shows up here.',
+                    ),
+                    const SizedBox(height: 18),
+                    const _IntroSection(
+                      icon: Icons.flag_outlined,
+                      color: AppColors.primary,
+                      title: "Today's value",
+                      body:
+                          'The value you chose to focus on today (like Health, Family, Growth). '
+                          'When you add a spend, you can tag it to a value — and Debbie will show how much of today\'s '
+                          'energy went toward what matters most. Set this in the Reflect tab.',
+                    ),
+                    const SizedBox(height: 18),
+                    const _IntroSection(
+                      icon: Icons.local_fire_department_outlined,
+                      color: AppColors.secondaryDeep,
+                      title: 'The streak pill',
+                      body:
+                          'Counts how many days in a row you have logged at least one transaction. '
+                          'It is here to celebrate consistency — never to pressure you. Skip a day, no problem.',
+                    ),
+                    const SizedBox(height: 18),
+                    const _IntroSection(
+                      icon: Icons.lightbulb_outline,
+                      color: AppColors.primary,
+                      title: 'The button on the right',
+                      body:
+                          'A suggested next step — usually opening Reflect to set today\'s value or write a quick check-in. '
+                          'Always optional. The card will tell you what is most useful right now.',
+                    ),
+                    const SizedBox(height: 28),
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: AppColors.secondary.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: AppColors.secondary.withValues(alpha: 0.2),
+                        ),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(
+                            Icons.tips_and_updates_outlined,
+                            size: 18,
+                            color: AppColors.secondaryDeep,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              'You can reopen this anytime by tapping the ? icon in the card header.',
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(
+                                    color: AppColors.secondaryDeep,
+                                    height: 1.5,
+                                  ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        child: const Text('Got it'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _IntroSection extends StatelessWidget {
+  const _IntroSection({
+    required this.icon,
+    required this.color,
+    required this.title,
+    required this.body,
+  });
+
+  final IconData icon;
+  final Color color;
+  final String title;
+  final String body;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          alignment: Alignment.center,
+          child: Icon(icon, size: 18, color: color),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: Theme.of(
+                  context,
+                ).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                body,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: AppColors.textSecondary,
+                  height: 1.5,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }
@@ -1559,18 +1880,30 @@ class WeeklyBudgetPlanCard extends ConsumerWidget {
     WidgetRef ref,
     WeeklyBudgetPlanModel plan,
   ) async {
+    int prefillAmount = plan.actualAmount ?? 0;
+    if (plan.actualAmount == null) {
+      final dayStart = DateTime(plan.date.year, plan.date.month, plan.date.day);
+      final dayEnd = dayStart
+          .add(const Duration(days: 1))
+          .subtract(const Duration(milliseconds: 1));
+      prefillAmount = await ref
+          .read(transactionsRepositoryProvider)
+          .getTotalForRange('expense', dayStart, dayEnd);
+    }
     final amountController = TextEditingController(
-      text: plan.actualAmount == null
+      text: prefillAmount == 0
           ? ''
-          : CurrencyUtils.formatInput(plan.actualAmount.toString()),
+          : CurrencyUtils.formatInput(prefillAmount.toString()),
     );
     final notesController = TextEditingController(text: plan.notes ?? '');
     String? error;
 
+    if (!context.mounted) return;
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
+      useRootNavigator: true,
       builder: (sheetContext) {
         return StatefulBuilder(
           builder: (sheetContext, setSheetState) {
@@ -1725,19 +2058,53 @@ class _WeeklyBudgetEmptyState extends StatelessWidget {
               Expanded(
                 child: ElevatedButton.icon(
                   onPressed: onAddDay,
-                  icon: const Icon(Icons.add_rounded, size: 18),
-                  label: const Text('Plan a day'),
+                  icon: const Icon(Icons.add_rounded, size: 16),
+                  label: const Text(
+                    'Plan a day',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 12,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    textStyle: GoogleFonts.nunito(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
-              OutlinedButton.icon(
-                onPressed: onQuickFill,
-                icon: const Icon(Icons.calendar_view_week_rounded, size: 18),
-                label: const Text('Fill week'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.primary,
-                  side: BorderSide(
-                    color: AppColors.primary.withValues(alpha: 0.4),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: onQuickFill,
+                  icon: const Icon(Icons.calendar_view_week_rounded, size: 16),
+                  label: const Text(
+                    'Fill week',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.primary,
+                    side: BorderSide(
+                      color: AppColors.primary.withValues(alpha: 0.4),
+                    ),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 12,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    textStyle: GoogleFonts.nunito(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
               ),
@@ -2169,30 +2536,28 @@ class _TodayPlanSpotlight extends ConsumerWidget {
             ),
           ),
           const SizedBox(height: 4),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              Flexible(
-                child: Text(
-                  CurrencyUtils.format(shownActual),
-                  style: GoogleFonts.jetBrainsMono(
-                    fontSize: 28,
-                    fontWeight: FontWeight.w700,
-                    color: accent,
-                  ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+          SizedBox(
+            width: double.infinity,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                CurrencyUtils.format(shownActual),
+                style: GoogleFonts.jetBrainsMono(
+                  fontSize: 28,
+                  fontWeight: FontWeight.w700,
+                  color: accent,
                 ),
+                maxLines: 1,
               ),
-              const SizedBox(width: 8),
-              Text(
-                'of ${CurrencyUtils.format(plan.plannedAmount)} planned',
-                style: Theme.of(
-                  context,
-                ).textTheme.bodySmall?.copyWith(color: AppColors.textSecondary),
-              ),
-            ],
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            'of ${CurrencyUtils.format(plan.plannedAmount)} planned',
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: AppColors.textSecondary),
           ),
           const SizedBox(height: 12),
 
@@ -2312,15 +2677,21 @@ class _SpotlightStat extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 4),
-          Text(
-            value,
-            style: GoogleFonts.jetBrainsMono(
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-              color: color,
+          SizedBox(
+            width: double.infinity,
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                value,
+                style: GoogleFonts.jetBrainsMono(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: color,
+                ),
+                maxLines: 1,
+              ),
             ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
           ),
         ],
       ),
@@ -2586,16 +2957,20 @@ class _MonthlyOverview extends StatelessWidget {
   const _MonthlyOverview({
     required this.income,
     required this.expenses,
+    required this.savings,
     required this.budgetAsync,
   });
 
   final int income;
   final int expenses;
+  final int savings;
   final AsyncValue<int> budgetAsync;
 
   @override
   Widget build(BuildContext context) {
-    final balance = income - expenses;
+    // Savings reduce the active pool silently — they're folded into balance
+    // but never surface as their own line.
+    final balance = income - expenses - savings;
     final total = income + expenses;
     final incomeRatio = total > 0 ? income / total : 0.5;
     final budget = budgetAsync.valueOrNull ?? 0;
@@ -2837,6 +3212,12 @@ extension _TrendRangeLabels on _TrendRange {
     _TrendRange.daily => 'day',
     _TrendRange.weekly => 'week',
     _TrendRange.monthly => 'month',
+  };
+
+  String get previousLabel => switch (this) {
+    _TrendRange.daily => 'yesterday',
+    _TrendRange.weekly => 'last week',
+    _TrendRange.monthly => 'last month',
   };
 
   int get labelStep => switch (this) {
@@ -3158,22 +3539,33 @@ class _TrendLinePanel extends StatelessWidget {
 
   static String _trendHelper(List<_TrendPoint> points, _TrendRange range) {
     if (points.isEmpty || points.every((point) => point.amount == 0)) {
-      return 'No activity';
+      return 'No activity yet';
     }
 
     final current = points.last.amount;
     final previous = points.length > 1 ? points[points.length - 2].amount : 0;
     final delta = current - previous;
-    if (delta == 0) return 'Flat vs prior ${range.previousUnit}';
+    final prev = range.previousLabel;
+    final prevAmount = CurrencyUtils.format(previous);
+    final deltaAmount = CurrencyUtils.format(delta.abs());
+
     if (previous == 0 && current > 0) {
-      return 'New this ${range.previousUnit}';
+      return 'First activity this ${range.previousUnit} (nothing $prev)';
     }
+    if (current == 0 && previous > 0) {
+      return 'Nothing this ${range.previousUnit} (was $prevAmount $prev)';
+    }
+    if (delta == 0) return 'Same as $prev ($prevAmount)';
+
     final sign = delta > 0 ? '+' : '-';
-    return '$sign${CurrencyUtils.format(delta.abs())} vs prior ${range.previousUnit}';
+    final pct = previous > 0
+        ? ' (${(delta.abs() / previous * 100).round()}%)'
+        : '';
+    return '$sign$deltaAmount$pct vs $prevAmount $prev';
   }
 }
 
-class _TrendLineChart extends StatelessWidget {
+class _TrendLineChart extends StatefulWidget {
   const _TrendLineChart({
     required this.points,
     required this.color,
@@ -3187,24 +3579,77 @@ class _TrendLineChart extends StatelessWidget {
   final String emptyLabel;
 
   @override
+  State<_TrendLineChart> createState() => _TrendLineChartState();
+}
+
+class _TrendLineChartState extends State<_TrendLineChart> {
+  int? _selectedIndex;
+
+  void _selectFromPosition(Offset local, Size size) {
+    if (widget.points.isEmpty) return;
+    const chartLeft = 8.0;
+    final chartRight = size.width - 8;
+    final chartWidth = chartRight - chartLeft;
+    final spacing = widget.points.length == 1
+        ? 0.0
+        : chartWidth / (widget.points.length - 1);
+
+    int idx;
+    if (spacing == 0) {
+      idx = 0;
+    } else {
+      idx = ((local.dx - chartLeft) / spacing).round();
+    }
+    idx = idx.clamp(0, widget.points.length - 1);
+    if (idx != _selectedIndex) {
+      setState(() => _selectedIndex = idx);
+    }
+  }
+
+  void _clear() {
+    if (_selectedIndex != null) {
+      setState(() => _selectedIndex = null);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return CustomPaint(
-      painter: _TrendLinePainter(
-        points: points,
-        color: color,
-        gridColor: AppColors.divider.withValues(alpha: 0.78),
-        labelStyle: Theme.of(context).textTheme.labelSmall?.copyWith(
-          color: AppColors.textSecondary,
-          fontWeight: FontWeight.w700,
-        ),
-        emptyStyle: Theme.of(context).textTheme.bodySmall?.copyWith(
-          color: AppColors.textSecondary,
-          fontWeight: FontWeight.w700,
-        ),
-        labelStep: labelStep,
-        emptyLabel: emptyLabel,
-      ),
-      child: const SizedBox.expand(),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final size = Size(constraints.maxWidth, constraints.maxHeight);
+        return MouseRegion(
+          onHover: (e) => _selectFromPosition(e.localPosition, size),
+          onExit: (_) => _clear(),
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTapDown: (d) => _selectFromPosition(d.localPosition, size),
+            onPanStart: (d) => _selectFromPosition(d.localPosition, size),
+            onPanUpdate: (d) => _selectFromPosition(d.localPosition, size),
+            onPanEnd: (_) => _clear(),
+            onTapUp: (_) => _clear(),
+            onTapCancel: _clear,
+            child: CustomPaint(
+              painter: _TrendLinePainter(
+                points: widget.points,
+                color: widget.color,
+                gridColor: AppColors.divider.withValues(alpha: 0.78),
+                labelStyle: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: AppColors.textSecondary,
+                  fontWeight: FontWeight.w700,
+                ),
+                emptyStyle: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: AppColors.textSecondary,
+                  fontWeight: FontWeight.w700,
+                ),
+                labelStep: widget.labelStep,
+                emptyLabel: widget.emptyLabel,
+                selectedIndex: _selectedIndex,
+              ),
+              child: const SizedBox.expand(),
+            ),
+          ),
+        );
+      },
     );
   }
 }
@@ -3218,6 +3663,7 @@ class _TrendLinePainter extends CustomPainter {
     required this.emptyStyle,
     required this.labelStep,
     required this.emptyLabel,
+    this.selectedIndex,
   });
 
   final List<_TrendPoint> points;
@@ -3227,6 +3673,7 @@ class _TrendLinePainter extends CustomPainter {
   final TextStyle? emptyStyle;
   final int labelStep;
   final String emptyLabel;
+  final int? selectedIndex;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -3305,27 +3752,154 @@ class _TrendLinePainter extends CustomPainter {
       canvas.drawCircle(offset, 4.4, dotBorderPaint);
       canvas.drawCircle(offset, 2.7, dotPaint);
     }
+
+    final selIdx = selectedIndex;
+    if (selIdx != null && selIdx >= 0 && selIdx < offsets.length) {
+      _drawSelection(
+        canvas,
+        size,
+        offsets[selIdx],
+        points[selIdx],
+        chartTop,
+        chartBottom,
+        chartLeft,
+        chartRight,
+      );
+    }
+  }
+
+  void _drawSelection(
+    Canvas canvas,
+    Size size,
+    Offset point,
+    _TrendPoint data,
+    double chartTop,
+    double chartBottom,
+    double chartLeft,
+    double chartRight,
+  ) {
+    // Vertical guide line.
+    final guidePaint = Paint()
+      ..color = color.withValues(alpha: 0.45)
+      ..strokeWidth = 1;
+    canvas.drawLine(
+      Offset(point.dx, chartTop),
+      Offset(point.dx, chartBottom),
+      guidePaint,
+    );
+
+    // Highlighted dot (larger, with white halo).
+    canvas.drawCircle(point, 7, Paint()..color = color.withValues(alpha: 0.18));
+    canvas.drawCircle(point, 5.2, Paint()..color = AppColors.surface);
+    canvas.drawCircle(point, 3.6, Paint()..color = color);
+
+    // Tooltip text.
+    final tooltipStyle = (labelStyle ?? const TextStyle()).copyWith(
+      color: Colors.white,
+      fontWeight: FontWeight.w700,
+      fontSize: 11,
+    );
+    final amountPainter = TextPainter(
+      text: TextSpan(
+        text: CurrencyUtils.format(data.amount),
+        style: tooltipStyle,
+      ),
+      textDirection: ui.TextDirection.ltr,
+      maxLines: 1,
+    )..layout(maxWidth: size.width - 16);
+
+    final datePainter = TextPainter(
+      text: TextSpan(
+        text: data.label,
+        style: tooltipStyle.copyWith(
+          fontWeight: FontWeight.w500,
+          color: Colors.white.withValues(alpha: 0.85),
+          fontSize: 10,
+        ),
+      ),
+      textDirection: ui.TextDirection.ltr,
+      maxLines: 1,
+    )..layout(maxWidth: size.width - 16);
+
+    const padX = 8.0;
+    const padY = 6.0;
+    final boxWidth =
+        math.max(amountPainter.width, datePainter.width) + padX * 2;
+    final boxHeight = amountPainter.height + datePainter.height + padY * 2 + 2;
+
+    var boxLeft = point.dx - boxWidth / 2;
+    var boxTop = point.dy - boxHeight - 12;
+    if (boxLeft < chartLeft) boxLeft = chartLeft;
+    if (boxLeft + boxWidth > chartRight) boxLeft = chartRight - boxWidth;
+    if (boxTop < 0) boxTop = point.dy + 12;
+
+    final boxRect = RRect.fromRectAndRadius(
+      Rect.fromLTWH(boxLeft, boxTop, boxWidth, boxHeight),
+      const Radius.circular(8),
+    );
+    canvas.drawRRect(
+      boxRect,
+      Paint()..color = AppColors.textPrimary.withValues(alpha: 0.92),
+    );
+    amountPainter.paint(canvas, Offset(boxLeft + padX, boxTop + padY));
+    datePainter.paint(
+      canvas,
+      Offset(boxLeft + padX, boxTop + padY + amountPainter.height + 2),
+    );
   }
 
   Path _smoothPath(List<Offset> offsets) {
+    final n = offsets.length;
     final path = Path()..moveTo(offsets.first.dx, offsets.first.dy);
-    if (offsets.length == 1) return path;
-
-    for (var i = 1; i < offsets.length; i++) {
-      final previous = offsets[i - 1];
-      final current = offsets[i];
-      final midpoint = Offset(
-        (previous.dx + current.dx) / 2,
-        (previous.dy + current.dy) / 2,
-      );
-      path.quadraticBezierTo(
-        previous.dx,
-        previous.dy,
-        midpoint.dx,
-        midpoint.dy,
-      );
+    if (n == 1) return path;
+    if (n == 2) {
+      path.lineTo(offsets[1].dx, offsets[1].dy);
+      return path;
     }
-    path.lineTo(offsets.last.dx, offsets.last.dy);
+
+    // Monotone cubic interpolation (Fritsch–Carlson). Tangents are clamped
+    // so the curve never overshoots between knots — no dipping below or
+    // above adjacent points before climbing.
+    final dx = List<double>.filled(n - 1, 0);
+    final slopes = List<double>.filled(n - 1, 0);
+    for (var i = 0; i < n - 1; i++) {
+      dx[i] = offsets[i + 1].dx - offsets[i].dx;
+      slopes[i] = dx[i] == 0 ? 0 : (offsets[i + 1].dy - offsets[i].dy) / dx[i];
+    }
+
+    final tangents = List<double>.filled(n, 0);
+    tangents[0] = slopes[0];
+    tangents[n - 1] = slopes[n - 2];
+    for (var i = 1; i < n - 1; i++) {
+      tangents[i] = (slopes[i - 1] * slopes[i] <= 0)
+          ? 0
+          : (slopes[i - 1] + slopes[i]) / 2;
+    }
+
+    for (var i = 0; i < n - 1; i++) {
+      if (slopes[i] == 0) {
+        tangents[i] = 0;
+        tangents[i + 1] = 0;
+      } else {
+        final a = tangents[i] / slopes[i];
+        final b = tangents[i + 1] / slopes[i];
+        final h = a * a + b * b;
+        if (h > 9) {
+          final t = 3 / math.sqrt(h);
+          tangents[i] = t * a * slopes[i];
+          tangents[i + 1] = t * b * slopes[i];
+        }
+      }
+    }
+
+    for (var i = 0; i < n - 1; i++) {
+      final p1 = offsets[i];
+      final p2 = offsets[i + 1];
+      final h = dx[i];
+      final cp1 = Offset(p1.dx + h / 3, p1.dy + tangents[i] * h / 3);
+      final cp2 = Offset(p2.dx - h / 3, p2.dy - tangents[i + 1] * h / 3);
+      path.cubicTo(cp1.dx, cp1.dy, cp2.dx, cp2.dy, p2.dx, p2.dy);
+    }
     return path;
   }
 
@@ -3374,7 +3948,8 @@ class _TrendLinePainter extends CustomPainter {
         oldDelegate.color != color ||
         oldDelegate.gridColor != gridColor ||
         oldDelegate.labelStep != labelStep ||
-        oldDelegate.emptyLabel != emptyLabel;
+        oldDelegate.emptyLabel != emptyLabel ||
+        oldDelegate.selectedIndex != selectedIndex;
   }
 }
 
@@ -3425,13 +4000,17 @@ class _MonthPulseAnalytics extends StatelessWidget {
     final paceColor = budget > 0 && paceRatio > 1.0
         ? AppColors.expense
         : AppColors.primary;
-    final paceLabel = budget <= 0
-        ? 'Current pace'
-        : paceRatio > 1.08
-        ? '${((paceRatio - 1) * 100).round()}% over pace'
-        : paceRatio < 0.92
-        ? '${((1 - paceRatio) * 100).round()}% under pace'
-        : 'On pace';
+    final monthSummary = _monthSummary(
+      monthExpense: monthExpense,
+      budget: budget,
+      projectedSpend: projectedSpend,
+      paceRatio: paceRatio,
+    );
+    final projectionHelper = _projectionHelper(
+      budget: budget,
+      projectedSpend: projectedSpend,
+      paceRatio: paceRatio,
+    );
 
     final last7Start = today.subtract(const Duration(days: 6));
     final previous7Start = today.subtract(const Duration(days: 13));
@@ -3442,8 +4021,10 @@ class _MonthPulseAnalytics extends StatelessWidget {
       previous7Start,
       previous7End,
     );
-    final weeklyDelta = last7 - previous7;
-    final weeklyDeltaPct = previous7 > 0 ? weeklyDelta / previous7 : null;
+    final last7Summary = _weeklyComparisonSummary(
+      last7: last7,
+      previous7: previous7,
+    );
     final topInsight = _topSpendInsight(expenseTransactions, values);
     final biggestDay = _biggestExpenseDay(expenseTransactions);
     final dayTotals = List.generate(7, (index) {
@@ -3481,14 +4062,14 @@ class _MonthPulseAnalytics extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Month pulse',
+                      'This month, so far',
                       style: Theme.of(context).textTheme.titleLarge,
                     ),
                     const SizedBox(height: 4),
                     Text(
                       expenseTransactions.isEmpty
-                          ? 'Analytics will appear once this month has spending.'
-                          : 'A quick read on pace, momentum, and where money is moving.',
+                          ? 'Add a few expenses this month and this card will explain how spending is tracking.'
+                          : monthSummary,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: AppColors.textSecondary,
                       ),
@@ -3513,26 +4094,39 @@ class _MonthPulseAnalytics extends StatelessWidget {
               children: [
                 Expanded(
                   child: _PulseHeroMetric(
-                    label: 'Projected spend',
-                    value: CurrencyUtils.format(projectedSpend),
-                    helper: paceLabel,
-                    color: paceColor,
+                    label: 'Spent so far',
+                    value: CurrencyUtils.format(monthExpense),
+                    helper: _elapsedDaysLabel(elapsedDays, daysInMonth),
+                    color: AppColors.textPrimary,
                   ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: _PulseHeroMetric(
-                    label: 'Last 7 days',
-                    value: CurrencyUtils.format(last7),
-                    helper: _weeklyDeltaLabel(weeklyDelta, weeklyDeltaPct),
-                    color: weeklyDelta <= 0
-                        ? AppColors.income
-                        : AppColors.expense,
+                    label: 'Month-end estimate',
+                    value: CurrencyUtils.format(projectedSpend),
+                    helper: projectionHelper,
+                    color: paceColor,
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 16),
+            Text(
+              'Daily spending in the last 7 days',
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: AppColors.textSecondary,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              last7Summary,
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: AppColors.textSecondary),
+            ),
+            const SizedBox(height: 8),
             _SevenDaySpendBars(days: dayTotals),
             const SizedBox(height: 16),
             Row(
@@ -3540,8 +4134,9 @@ class _MonthPulseAnalytics extends StatelessWidget {
                 Expanded(
                   child: _PulseMiniMetric(
                     icon: topInsight.icon,
-                    label: topInsight.label,
-                    value: CurrencyUtils.format(topInsight.amount),
+                    label: 'Most spent on',
+                    value: topInsight.label,
+                    helper: CurrencyUtils.format(topInsight.amount),
                     color: topInsight.color,
                   ),
                 ),
@@ -3549,11 +4144,12 @@ class _MonthPulseAnalytics extends StatelessWidget {
                 Expanded(
                   child: _PulseMiniMetric(
                     icon: Icons.calendar_today_outlined,
-                    label: biggestDay == null
-                        ? 'Biggest day'
-                        : DateFormat('d MMM').format(biggestDay.day),
+                    label: 'Highest-spend day',
                     value: biggestDay == null
-                        ? CurrencyUtils.format(0)
+                        ? 'No expenses yet'
+                        : DateFormat('d MMM').format(biggestDay.day),
+                    helper: biggestDay == null
+                        ? null
                         : CurrencyUtils.format(biggestDay.amount),
                     color: AppColors.secondaryDeep,
                   ),
@@ -3562,8 +4158,9 @@ class _MonthPulseAnalytics extends StatelessWidget {
                 Expanded(
                   child: _PulseMiniMetric(
                     icon: Icons.trending_flat_rounded,
-                    label: 'Daily avg',
+                    label: 'Average per day',
                     value: CurrencyUtils.format(dailyAverage),
+                    helper: 'Based on $elapsedDays ${_dayLabel(elapsedDays)}',
                     color: AppColors.textSoft,
                   ),
                 ),
@@ -3604,6 +4201,70 @@ class _MonthPulseAnalytics extends StatelessWidget {
               AppDateUtils.isSameDay(tx.date, normalized);
         })
         .fold<int>(0, (sum, tx) => sum + tx.totalAmount);
+  }
+
+  static String _monthSummary({
+    required int monthExpense,
+    required int budget,
+    required int projectedSpend,
+    required double paceRatio,
+  }) {
+    final spentSoFar = CurrencyUtils.format(monthExpense);
+    if (budget <= 0) {
+      return 'You have spent $spentSoFar so far this month. If this pace continues, the month may end near ${CurrencyUtils.format(projectedSpend)}.';
+    }
+
+    final budgetLabel = CurrencyUtils.format(budget);
+    if (paceRatio > 1.08) {
+      final overBy = CurrencyUtils.format(projectedSpend - budget);
+      return 'You have spent $spentSoFar so far this month. If this pace continues, you may finish about $overBy over your $budgetLabel budget.';
+    }
+    if (paceRatio < 0.92) {
+      final underBy = CurrencyUtils.format(budget - projectedSpend);
+      return 'You have spent $spentSoFar so far this month. If this pace continues, you may finish about $underBy under your $budgetLabel budget.';
+    }
+    return 'You have spent $spentSoFar so far this month and are tracking close to your $budgetLabel budget.';
+  }
+
+  static String _elapsedDaysLabel(int elapsedDays, int daysInMonth) {
+    return 'Day $elapsedDays of $daysInMonth';
+  }
+
+  static String _projectionHelper({
+    required int budget,
+    required int projectedSpend,
+    required double paceRatio,
+  }) {
+    if (budget <= 0) return 'Based on your current daily average';
+    if (paceRatio > 1.08) {
+      return '${CurrencyUtils.format(projectedSpend - budget)} over budget';
+    }
+    if (paceRatio < 0.92) {
+      return '${CurrencyUtils.format(budget - projectedSpend)} under budget';
+    }
+    return 'Close to your ${CurrencyUtils.format(budget)} budget';
+  }
+
+  static String _weeklyComparisonSummary({
+    required int last7,
+    required int previous7,
+  }) {
+    final last7Label = CurrencyUtils.format(last7);
+    if (previous7 <= 0) {
+      if (last7 <= 0) {
+        return 'No spending has been recorded in the last 7 days yet.';
+      }
+      return 'You spent $last7Label in the last 7 days. There was no spending in the 7 days before that.';
+    }
+
+    final delta = last7 - previous7;
+    if (delta == 0) {
+      return 'You spent $last7Label in the last 7 days, the same as the 7 days before.';
+    }
+
+    final difference = CurrencyUtils.format(delta.abs());
+    final direction = delta > 0 ? 'more' : 'less';
+    return 'You spent $last7Label in the last 7 days, which is $difference $direction than the 7 days before.';
   }
 
   static _SpendInsight _topSpendInsight(
@@ -3670,13 +4331,8 @@ class _MonthPulseAnalytics extends StatelessWidget {
     return _DailySpend(day: top.key, amount: top.value);
   }
 
-  static String _weeklyDeltaLabel(int delta, double? pct) {
-    if (pct == null) {
-      return delta == 0 ? 'No prior week yet' : 'New activity';
-    }
-    if (delta == 0) return 'Same as previous week';
-    final direction = delta > 0 ? 'up' : 'down';
-    return '$direction ${(pct.abs() * 100).round()}% vs prior week';
+  static String _dayLabel(int count) {
+    return count == 1 ? 'day' : 'days';
   }
 }
 
@@ -3749,12 +4405,14 @@ class _PulseMiniMetric extends StatelessWidget {
     required this.label,
     required this.value,
     required this.color,
+    this.helper,
   });
 
   final Object icon;
   final String label;
   final String value;
   final Color color;
+  final String? helper;
 
   @override
   Widget build(BuildContext context) {
@@ -3803,6 +4461,18 @@ class _PulseMiniMetric extends StatelessWidget {
               ),
             ),
           ),
+          if (helper != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              helper!,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: AppColors.textSecondary,
+                fontWeight: FontWeight.w600,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
         ],
       ),
     );
@@ -3863,7 +4533,7 @@ class _SevenDaySpendBars extends StatelessWidget {
                   ),
                   const SizedBox(height: 7),
                   Text(
-                    DateFormat('E').format(day.day).substring(0, 1),
+                    DateFormat('E').format(day.day),
                     style: Theme.of(context).textTheme.labelSmall?.copyWith(
                       color: isToday
                           ? AppColors.primary
@@ -4857,7 +5527,7 @@ class _RecurringCommitmentsCard extends ConsumerWidget {
 // Available balance — cumulative all-time income minus expenses
 // ---------------------------------------------------------------------------
 
-class _AvailableBalanceCard extends StatelessWidget {
+class _AvailableBalanceCard extends ConsumerWidget {
   const _AvailableBalanceCard({
     required this.availableAsync,
     required this.totalInAsync,
@@ -4880,7 +5550,8 @@ class _AvailableBalanceCard extends StatelessWidget {
   ];
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final visible = ref.watch(balanceVisibleProvider).valueOrNull ?? true;
     final available = availableAsync.valueOrNull ?? 0;
     final totalIn = totalInAsync.valueOrNull ?? 0;
     final totalOut = totalOutAsync.valueOrNull ?? 0;
@@ -4956,6 +5627,26 @@ class _AvailableBalanceCard extends StatelessWidget {
                         ),
                       ),
                     ),
+                    const SizedBox(width: 8),
+                    InkWell(
+                      onTap: () =>
+                          ref.read(balanceVisibleProvider.notifier).toggle(),
+                      borderRadius: BorderRadius.circular(20),
+                      child: Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.14),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          visible
+                              ? Icons.visibility_outlined
+                              : Icons.visibility_off_outlined,
+                          size: 14,
+                          color: Colors.white.withValues(alpha: 0.92),
+                        ),
+                      ),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 14),
@@ -4975,6 +5666,31 @@ class _AvailableBalanceCard extends StatelessWidget {
                             ),
                           ),
                         ),
+                      )
+                    : !visible
+                    ? Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(
+                            'Rp ',
+                            style: GoogleFonts.lora(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w500,
+                              color: Colors.white.withValues(alpha: 0.75),
+                              height: 1.8,
+                            ),
+                          ),
+                          Text(
+                            '••••••',
+                            style: GoogleFonts.lora(
+                              fontSize: 38,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
+                              letterSpacing: 2,
+                              height: 1.0,
+                            ),
+                          ),
+                        ],
                       )
                     : TweenAnimationBuilder<double>(
                         tween: Tween(begin: 0, end: available.abs().toDouble()),
@@ -5044,6 +5760,7 @@ class _AvailableBalanceCard extends StatelessWidget {
                       label: 'Total in',
                       amount: totalIn,
                       icon: Icons.south_rounded,
+                      visible: visible,
                     ),
                     Container(
                       width: 1,
@@ -5055,6 +5772,7 @@ class _AvailableBalanceCard extends StatelessWidget {
                       label: 'Total out',
                       amount: totalOut,
                       icon: Icons.north_rounded,
+                      visible: visible,
                     ),
                   ],
                 ),
@@ -5072,11 +5790,13 @@ class _BalanceStat extends StatelessWidget {
     required this.label,
     required this.amount,
     required this.icon,
+    this.visible = true,
   });
 
   final String label;
   final int amount;
   final IconData icon;
+  final bool visible;
 
   @override
   Widget build(BuildContext context) {
@@ -5099,7 +5819,7 @@ class _BalanceStat extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  CurrencyUtils.format(amount),
+                  visible ? CurrencyUtils.format(amount) : 'Rp ••••',
                   style: GoogleFonts.nunito(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,

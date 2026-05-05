@@ -47,6 +47,14 @@ class RecurringScreen extends ConsumerWidget {
             ),
           ],
         ),
+        actions: [
+          IconButton(
+            tooltip: 'Payment history',
+            icon: const Icon(Icons.history_rounded, size: 20),
+            onPressed: () => context.push('/recurring/history'),
+          ),
+          const SizedBox(width: 4),
+        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => context.push('/recurring/add'),
@@ -54,10 +62,7 @@ class RecurringScreen extends ConsumerWidget {
         icon: const Icon(Icons.add, color: Colors.white),
         label: const Text(
           'Add commitment',
-          style: TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.w600,
-          ),
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
         ),
         elevation: 3,
       ),
@@ -76,14 +81,15 @@ class RecurringScreen extends ConsumerWidget {
             }
 
             // Sort: unpaid first, then paid; within each group sort by due day
-            final sorted = [...expenses]..sort((a, b) {
-              final aPaid = paymentMap.containsKey(a.id);
-              final bPaid = paymentMap.containsKey(b.id);
-              if (aPaid != bPaid) return aPaid ? 1 : -1;
-              final aDay = a.dueDay ?? 99;
-              final bDay = b.dueDay ?? 99;
-              return aDay.compareTo(bDay);
-            });
+            final sorted = [...expenses]
+              ..sort((a, b) {
+                final aPaid = paymentMap.containsKey(a.id);
+                final bPaid = paymentMap.containsKey(b.id);
+                if (aPaid != bPaid) return aPaid ? 1 : -1;
+                final aDay = a.dueDay ?? 99;
+                final bDay = b.dueDay ?? 99;
+                return aDay.compareTo(bDay);
+              });
 
             return ListView(
               padding: const EdgeInsets.only(bottom: 120),
@@ -112,11 +118,11 @@ class RecurringScreen extends ConsumerWidget {
                       .where((v) => v.id == expense.valueId)
                       .firstOrNull;
                   return _RecurringExpenseTile(
-                    key: ValueKey(expense.id),
-                    expense: expense,
-                    payment: payment,
-                    value: value,
-                  )
+                        key: ValueKey(expense.id),
+                        expense: expense,
+                        payment: payment,
+                        value: value,
+                      )
                       .animate(delay: Duration(milliseconds: index * 55))
                       .fadeIn(duration: 300.ms, curve: Curves.easeOut)
                       .slideY(
@@ -231,9 +237,7 @@ class _SummaryCard extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    allDone
-                        ? 'All paid!'
-                        : '${summary.unpaidCount} remaining',
+                    allDone ? 'All paid!' : '${summary.unpaidCount} remaining',
                     style: GoogleFonts.lora(
                       fontSize: 18,
                       fontWeight: FontWeight.w600,
@@ -447,7 +451,11 @@ class _RecurringExpenseTile extends ConsumerWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.delete_outline, color: AppColors.expense, size: 22),
+            const Icon(
+              Icons.delete_outline,
+              color: AppColors.expense,
+              size: 22,
+            ),
             const SizedBox(height: 4),
             const Text(
               'Delete',
@@ -586,15 +594,13 @@ class _RecurringExpenseTile extends ConsumerWidget {
                                 // Amount
                                 Text(
                                   CurrencyUtils.format(expense.amount),
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .titleSmall
+                                  style: Theme.of(context).textTheme.titleSmall
                                       ?.copyWith(
                                         fontFamily: 'JetBrains Mono',
                                         fontWeight: FontWeight.w700,
                                         color: _isPaid
                                             ? AppColors.textSecondary
-                                                .withValues(alpha: 0.6)
+                                                  .withValues(alpha: 0.6)
                                             : AppColors.expense,
                                         decoration: _isPaid
                                             ? TextDecoration.lineThrough
@@ -747,10 +753,7 @@ class _PayButtonState extends ConsumerState<_PayButton> {
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(
-              color: AppColors.divider,
-              width: 1,
-            ),
+            border: Border.all(color: AppColors.divider, width: 1),
           ),
           child: const Text(
             'Undo',
@@ -880,9 +883,9 @@ class _EmptyState extends StatelessWidget {
             const SizedBox(height: 24),
             Text(
               'No commitments yet',
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                fontFamily: 'Lora',
-              ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleLarge?.copyWith(fontFamily: 'Lora'),
             ),
             const SizedBox(height: 10),
             Text(

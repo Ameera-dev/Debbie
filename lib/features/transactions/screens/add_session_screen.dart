@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -109,8 +110,6 @@ class _AddSessionScreenState extends ConsumerState<AddSessionScreen> {
       }
     } else {
       _addItem(scrollToBottom: false);
-      // Auto-capture location for new transactions (background, no blocking)
-      _captureLocation(silent: true);
     }
     if (mounted) setState(() => _loading = false);
   }
@@ -136,6 +135,24 @@ class _AddSessionScreenState extends ConsumerState<AddSessionScreen> {
         LocationFailure.unknown => 'Could not get location.',
       };
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    }
+  }
+
+  Future<void> _showLocationSearch() async {
+    final picked = await showModalBottomSheet<LocationData>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Theme.of(context).cardTheme.color,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (_) => _LocationSearchSheet(
+        service: ref.read(locationServiceProvider),
+        initialQuery: _locationData?.label ?? '',
+      ),
+    );
+    if (picked != null && mounted) {
+      setState(() => _locationData = picked);
     }
   }
 
@@ -307,9 +324,9 @@ class _AddSessionScreenState extends ConsumerState<AddSessionScreen> {
                 _DateRow(date: _date, onTap: _pickDate),
                 const Spacer(),
                 _SmallToggle(
-                  isExpense: _type == 'expense',
-                  onToggle: (isExpense) => setState(() {
-                    _type = isExpense ? 'expense' : 'income';
+                  type: _type,
+                  onChanged: (newType) => setState(() {
+                    _type = newType;
                     // Reset tags on all items when type changes
                     for (final item in _items) {
                       item.tags = [];
@@ -424,6 +441,7 @@ class _AddSessionScreenState extends ConsumerState<AddSessionScreen> {
               locationData: _locationData,
               isLoading: _locationLoading,
               onCapture: () => _captureLocation(),
+              onSearch: _showLocationSearch,
               onClear: () => setState(() => _locationData = null),
             ),
 
@@ -475,9 +493,11 @@ class _AddSessionScreenState extends ConsumerState<AddSessionScreen> {
                     controller: _notesController,
                     maxLines: 4,
                     decoration: InputDecoration(
-                      hintText: _type == 'income'
-                          ? 'How does receiving this feel?'
-                          : 'What did this spending mean to you?',
+                      hintText: switch (_type) {
+                        'income' => 'How does receiving this feel?',
+                        'saving' => 'What is this saving for?',
+                        _ => 'What did this spending mean to you?',
+                      },
                       alignLabelWithHint: true,
                       filled: false,
                       border: InputBorder.none,
@@ -894,9 +914,11 @@ class _AddSessionScreenState extends ConsumerState<AddSessionScreen> {
 
       HapticFeedback.mediumImpact();
       if (mounted) {
-        final messages = _type == 'income'
-            ? AppStrings.postSaveIncomeMessages
-            : AppStrings.postSaveExpenseMessages;
+        final messages = switch (_type) {
+          'income' => AppStrings.postSaveIncomeMessages,
+          'saving' => AppStrings.postSaveSavingMessages,
+          _ => AppStrings.postSaveExpenseMessages,
+        };
         final message = isPending
             ? 'Set aside for tomorrow. You can revisit it after a day of space.'
             : messages[DateTime.now().millisecond % messages.length];
@@ -996,9 +1018,11 @@ class _ItemCardState extends State<_ItemCard> {
   @override
   Widget build(BuildContext context) {
     final item = widget.item;
-    final amountColor = widget.type == 'expense'
-        ? AppColors.expense
-        : AppColors.income;
+    final amountColor = switch (widget.type) {
+      'expense' => AppColors.expense,
+      'saving' => AppColors.saving,
+      _ => AppColors.income,
+    };
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -1672,29 +1696,247 @@ class _EmotionSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: MindfulnessContent.emotions.map((emotion) {
-        final selected = emotion.id == selectedEmotion;
-        return ChoiceChip(
-          label: Text('${emotion.emoji} ${emotion.label}'),
-          selected: selected,
-          onSelected: (_) => onChanged(selected ? null : emotion.id),
-          selectedColor: AppColors.secondary.withValues(alpha: 0.16),
-          side: BorderSide(
-            color: selected ? AppColors.secondary : AppColors.divider,
-          ),
-          labelStyle: TextStyle(
-            color: selected ? AppColors.secondaryDeep : AppColors.textSecondary,
-            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-          ),
-          showCheckmark: false,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(18),
-          ),
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final selectedOption = MindfulnessContent.emotionById(selectedEmotion);
+    final summaryBackground = selectedOption == null
+        ? (isDark
+              ? AppColors.darkSurface.withValues(alpha: 0.88)
+              : AppColors.surfaceWarm.withValues(alpha: 0.94))
+        : AppColors.secondary.withValues(alpha: isDark ? 0.18 : 0.1);
+    final summaryBorder = selectedOption == null
+        ? (isDark
+              ? AppColors.darkTextSecondary.withValues(alpha: 0.16)
+              : AppColors.divider.withValues(alpha: 0.95))
+        : AppColors.secondary.withValues(alpha: 0.28);
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = constraints.maxWidth >= 640 ? 3 : 2;
+        const spacing = 10.0;
+        final width =
+            (constraints.maxWidth - (spacing * (columns - 1))) / columns;
+        final optionWidth = width.isFinite && width > 0
+            ? width
+            : constraints.maxWidth;
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+              decoration: BoxDecoration(
+                color: summaryBackground,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: summaryBorder),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TideSurfaceIcon(
+                    icon: selectedOption == null
+                        ? Icons.favorite_border_rounded
+                        : Icons.auto_awesome_rounded,
+                    size: 17,
+                    color: selectedOption == null
+                        ? AppColors.textSoft
+                        : AppColors.secondaryDeep,
+                    backgroundColor: selectedOption == null
+                        ? (isDark ? AppColors.darkSurface : AppColors.surface)
+                        : AppColors.secondary.withValues(alpha: 0.14),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          selectedOption == null
+                              ? 'Name the energy behind this spending'
+                              : 'You marked this as ${selectedOption.label.toLowerCase()}',
+                          style: Theme.of(context).textTheme.titleSmall
+                              ?.copyWith(
+                                color: selectedOption == null
+                                    ? null
+                                    : AppColors.secondaryDeep,
+                              ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          selectedOption == null
+                              ? 'Optional, but it helps Debbie spot the patterns behind your decisions.'
+                              : _emotionDescription(selectedOption.id),
+                          style: Theme.of(context).textTheme.bodyMedium
+                              ?.copyWith(
+                                color: selectedOption == null
+                                    ? AppColors.textSecondary
+                                    : AppColors.secondaryDeep.withValues(
+                                        alpha: 0.86,
+                                      ),
+                              ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (selectedOption == null)
+                    TidePill(
+                      label: 'Optional',
+                      color: AppColors.textSecondary,
+                      backgroundColor: AppColors.surface.withValues(alpha: 0.9),
+                    )
+                  else
+                    TextButton(
+                      onPressed: () => onChanged(null),
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppColors.secondaryDeep,
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      child: const Text('Clear'),
+                    ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: spacing,
+              runSpacing: spacing,
+              children: MindfulnessContent.emotions.map((emotion) {
+                final selected = emotion.id == selectedEmotion;
+                return SizedBox(
+                  width: optionWidth,
+                  child: _EmotionOptionCard(
+                    emotion: emotion,
+                    selected: selected,
+                    description: _emotionDescription(emotion.id),
+                    onTap: () => onChanged(selected ? null : emotion.id),
+                  ),
+                );
+              }).toList(),
+            ),
+          ],
         );
-      }).toList(),
+      },
+    );
+  }
+
+  String _emotionDescription(String id) {
+    return switch (id) {
+      'joyful' => 'Light, warm, or celebratory.',
+      'anxious' => 'Tight, uncertain, or protective.',
+      'impulsive' => 'Fast, urgent, or hard to pause.',
+      'intentional' => 'Chosen with purpose and clarity.',
+      'generous' => 'Open-hearted and glad to give.',
+      'guilty' => 'Heavy, regretful, or a little off.',
+      'proud' => 'Aligned with progress you value.',
+      _ => 'A quick note for the emotional side of this choice.',
+    };
+  }
+}
+
+class _EmotionOptionCard extends StatelessWidget {
+  const _EmotionOptionCard({
+    required this.emotion,
+    required this.selected,
+    required this.description,
+    required this.onTap,
+  });
+
+  final MoneyEmotionOption emotion;
+  final bool selected;
+  final String description;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final background = selected
+        ? AppColors.secondary.withValues(alpha: isDark ? 0.2 : 0.12)
+        : (isDark
+              ? AppColors.darkSurface.withValues(alpha: 0.88)
+              : AppColors.surface.withValues(alpha: 0.94));
+    final borderColor = selected
+        ? AppColors.secondary.withValues(alpha: 0.36)
+        : (isDark
+              ? AppColors.darkTextSecondary.withValues(alpha: 0.16)
+              : AppColors.divider.withValues(alpha: 0.95));
+    final emojiBackground = selected
+        ? AppColors.secondary.withValues(alpha: 0.16)
+        : (isDark ? AppColors.darkBackground : AppColors.surfaceWarm);
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(20),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          constraints: const BoxConstraints(minHeight: 138),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: background,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: borderColor),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    alignment: Alignment.center,
+                    decoration: BoxDecoration(
+                      color: emojiBackground,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Text(
+                      emotion.emoji,
+                      style: const TextStyle(fontSize: 21),
+                    ),
+                  ),
+                  const Spacer(),
+                  AnimatedOpacity(
+                    duration: const Duration(milliseconds: 140),
+                    opacity: selected ? 1 : 0,
+                    child: Container(
+                      width: 28,
+                      height: 28,
+                      decoration: BoxDecoration(
+                        color: AppColors.secondaryDeep,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(
+                        Icons.check_rounded,
+                        size: 16,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Text(
+                emotion.label,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: selected ? AppColors.secondaryDeep : null,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                description,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: selected
+                      ? AppColors.secondaryDeep.withValues(alpha: 0.82)
+                      : AppColors.textSecondary,
+                  height: 1.45,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }
@@ -1791,10 +2033,10 @@ class _DateRow extends StatelessWidget {
 }
 
 class _SmallToggle extends StatelessWidget {
-  const _SmallToggle({required this.isExpense, required this.onToggle});
+  const _SmallToggle({required this.type, required this.onChanged});
 
-  final bool isExpense;
-  final ValueChanged<bool> onToggle;
+  final String type;
+  final ValueChanged<String> onChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -1808,15 +2050,21 @@ class _SmallToggle extends StatelessWidget {
         children: [
           _ToggleTab(
             label: 'Expense',
-            selected: isExpense,
+            selected: type == 'expense',
             color: AppColors.expense,
-            onTap: () => onToggle(true),
+            onTap: () => onChanged('expense'),
           ),
           _ToggleTab(
             label: 'Income',
-            selected: !isExpense,
+            selected: type == 'income',
             color: AppColors.income,
-            onTap: () => onToggle(false),
+            onTap: () => onChanged('income'),
+          ),
+          _ToggleTab(
+            label: 'Save',
+            selected: type == 'saving',
+            color: AppColors.saving,
+            onTap: () => onChanged('saving'),
           ),
         ],
       ),
@@ -1962,112 +2210,396 @@ class _LocationRow extends StatelessWidget {
     required this.locationData,
     required this.isLoading,
     required this.onCapture,
+    required this.onSearch,
     required this.onClear,
   });
 
   final LocationData? locationData;
   final bool isLoading;
   final VoidCallback onCapture;
+  final VoidCallback onSearch;
   final VoidCallback onClear;
 
   @override
   Widget build(BuildContext context) {
-    if (isLoading) {
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: Theme.of(context).cardTheme.color,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.divider),
-        ),
-        child: const Row(
-          children: [
-            SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            ),
-            SizedBox(width: 12),
-            Text('Getting your location...'),
-          ],
-        ),
-      );
-    }
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final hasLocation = locationData != null;
+    final background = hasLocation
+        ? AppColors.secondary.withValues(alpha: isDark ? 0.18 : 0.08)
+        : (isDark
+              ? AppColors.darkSurface.withValues(alpha: 0.88)
+              : AppColors.surfaceWarm.withValues(alpha: 0.94));
+    final borderColor = hasLocation
+        ? AppColors.secondary.withValues(alpha: 0.24)
+        : (isDark
+              ? AppColors.darkTextSecondary.withValues(alpha: 0.16)
+              : AppColors.divider.withValues(alpha: 0.95));
 
-    if (locationData != null) {
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          color: AppColors.secondary.withValues(alpha: 0.06),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.secondary.withValues(alpha: 0.2)),
-        ),
-        child: Row(
-          children: [
-            const Icon(
-              Icons.location_on_rounded,
-              size: 18,
-              color: AppColors.secondary,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                locationData!.label,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: AppColors.secondaryDeep,
-                  fontWeight: FontWeight.w500,
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: borderColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TideSurfaceIcon(
+                icon: hasLocation
+                    ? Icons.place_rounded
+                    : Icons.add_location_alt_rounded,
+                size: 17,
+                color: hasLocation
+                    ? AppColors.secondaryDeep
+                    : AppColors.primaryDeep,
+                backgroundColor: hasLocation
+                    ? AppColors.secondary.withValues(alpha: 0.14)
+                    : (isDark ? AppColors.darkSurface : AppColors.surface),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      isLoading
+                          ? 'Finding your current spot'
+                          : hasLocation
+                          ? 'Location attached'
+                          : 'Add context with a place',
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        color: hasLocation ? AppColors.secondaryDeep : null,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    if (isLoading)
+                      Text(
+                        'This only takes a moment.',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: AppColors.textSecondary,
+                        ),
+                      )
+                    else if (hasLocation)
+                      Text(
+                        locationData!.label,
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(
+                              color: AppColors.secondaryDeep,
+                              height: 1.35,
+                            ),
+                      )
+                    else
+                      Text(
+                        'Search for a place or use your current spot so this transaction is easier to revisit later.',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: AppColors.textSecondary,
+                        ),
+                      ),
+                  ],
                 ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
               ),
-            ),
-            const SizedBox(width: 8),
-            GestureDetector(
-              onTap: onClear,
-              child: Icon(
-                Icons.close,
-                size: 16,
-                color: AppColors.textSecondary.withValues(alpha: 0.7),
+              const SizedBox(width: 8),
+              TidePill(
+                label: hasLocation ? 'Attached' : 'Optional',
+                color: hasLocation
+                    ? AppColors.secondaryDeep
+                    : AppColors.textSecondary,
+                backgroundColor: hasLocation
+                    ? AppColors.secondary.withValues(alpha: 0.14)
+                    : AppColors.surface.withValues(alpha: 0.92),
               ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    // No location — show a subtle button
-    return GestureDetector(
-      onTap: onCapture,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        decoration: BoxDecoration(
-          color: Theme.of(context).cardTheme.color,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.divider),
-        ),
-        child: Row(
-          children: [
-            Icon(
-              Icons.location_off_outlined,
-              size: 18,
-              color: AppColors.textSecondary.withValues(alpha: 0.6),
-            ),
-            const SizedBox(width: 10),
+            ],
+          ),
+          const SizedBox(height: 14),
+          if (isLoading)
+            Row(
+              children: [
+                const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  'Getting your location...',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ],
+            )
+          else if (hasLocation)
             Text(
-              'Tap to capture location',
-              style: Theme.of(
-                context,
-              ).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
+              'You can swap this place, refresh it from your current position, or remove it entirely.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: AppColors.secondaryDeep.withValues(alpha: 0.82),
+                height: 1.45,
+              ),
             ),
-            const Spacer(),
-            Icon(
-              Icons.my_location_outlined,
-              size: 16,
-              color: AppColors.primary.withValues(alpha: 0.7),
-            ),
-          ],
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              FilledButton.tonalIcon(
+                onPressed: isLoading ? null : onCapture,
+                icon: Icon(
+                  hasLocation
+                      ? Icons.my_location_rounded
+                      : Icons.near_me_rounded,
+                  size: 16,
+                ),
+                label: Text(
+                  hasLocation ? 'Refresh current' : 'Use current spot',
+                ),
+                style: FilledButton.styleFrom(
+                  foregroundColor: AppColors.primaryDeep,
+                  backgroundColor: AppColors.primary.withValues(alpha: 0.12),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 12,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+              ),
+              OutlinedButton.icon(
+                onPressed: isLoading ? null : onSearch,
+                icon: const Icon(Icons.search_rounded, size: 16),
+                label: Text(hasLocation ? 'Change place' : 'Search place'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: hasLocation
+                      ? AppColors.secondaryDeep
+                      : AppColors.primary,
+                  side: BorderSide(
+                    color: hasLocation
+                        ? AppColors.secondary.withValues(alpha: 0.34)
+                        : AppColors.divider,
+                  ),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 12,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+              ),
+              if (hasLocation)
+                TextButton.icon(
+                  onPressed: onClear,
+                  icon: const Icon(Icons.close_rounded, size: 16),
+                  label: const Text('Remove'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppColors.textSecondary,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 12,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Location search sheet
+// ---------------------------------------------------------------------------
+
+class _LocationSearchSheet extends StatefulWidget {
+  const _LocationSearchSheet({
+    required this.service,
+    required this.initialQuery,
+  });
+
+  final LocationService service;
+  final String initialQuery;
+
+  @override
+  State<_LocationSearchSheet> createState() => _LocationSearchSheetState();
+}
+
+class _LocationSearchSheetState extends State<_LocationSearchSheet> {
+  late final TextEditingController _controller;
+  Timer? _debounce;
+  List<LocationData> _results = const [];
+  bool _searching = false;
+  bool _searched = false;
+  int _searchToken = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.initialQuery);
+    if (widget.initialQuery.trim().isNotEmpty) {
+      _runSearch(widget.initialQuery);
+    }
+  }
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onChanged(String value) {
+    _debounce?.cancel();
+    if (value.trim().isEmpty) {
+      setState(() {
+        _results = const [];
+        _searching = false;
+        _searched = false;
+      });
+      return;
+    }
+    _debounce = Timer(
+      const Duration(milliseconds: 450),
+      () => _runSearch(value),
+    );
+  }
+
+  Future<void> _runSearch(String query) async {
+    final token = ++_searchToken;
+    setState(() => _searching = true);
+    final results = await widget.service.searchPlaces(query);
+    if (!mounted || token != _searchToken) return;
+    setState(() {
+      _results = results;
+      _searching = false;
+      _searched = true;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final viewInsets = MediaQuery.of(context).viewInsets.bottom;
+    return Padding(
+      padding: EdgeInsets.only(bottom: viewInsets),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppColors.divider,
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              Text(
+                'Search a place',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _controller,
+                autofocus: true,
+                textInputAction: TextInputAction.search,
+                onChanged: _onChanged,
+                onSubmitted: _runSearch,
+                decoration: InputDecoration(
+                  hintText: 'e.g. Pasar Santa, Jakarta',
+                  prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                  suffixIcon: _controller.text.isEmpty
+                      ? null
+                      : IconButton(
+                          icon: const Icon(Icons.close_rounded, size: 18),
+                          onPressed: () {
+                            _controller.clear();
+                            _onChanged('');
+                          },
+                        ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 12),
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: MediaQuery.of(context).size.height * 0.45,
+                ),
+                child: _buildResults(),
+              ),
+            ],
+          ),
         ),
       ),
+    );
+  }
+
+  Widget _buildResults() {
+    if (_searching) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (!_searched) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Text(
+          'Type a place name or address to search.',
+          style: Theme.of(
+            context,
+          ).textTheme.bodySmall?.copyWith(color: AppColors.textSecondary),
+        ),
+      );
+    }
+    if (_results.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        child: Text(
+          'No matches. Try a different name or include the city.',
+          style: Theme.of(
+            context,
+          ).textTheme.bodySmall?.copyWith(color: AppColors.textSecondary),
+        ),
+      );
+    }
+    return ListView.separated(
+      shrinkWrap: true,
+      itemCount: _results.length,
+      separatorBuilder: (_, __) =>
+          Divider(height: 1, color: AppColors.divider.withValues(alpha: 0.6)),
+      itemBuilder: (context, i) {
+        final r = _results[i];
+        return ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+          leading: const Icon(
+            Icons.location_on_outlined,
+            color: AppColors.secondary,
+          ),
+          title: Text(r.label, maxLines: 2, overflow: TextOverflow.ellipsis),
+          subtitle: Text(
+            '${r.latitude.toStringAsFixed(4)}, ${r.longitude.toStringAsFixed(4)}',
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: AppColors.textSecondary),
+          ),
+          onTap: () => Navigator.of(context).pop(r),
+        );
+      },
     );
   }
 }

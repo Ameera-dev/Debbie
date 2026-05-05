@@ -12,7 +12,7 @@ import '../../../shared/utils/date_utils.dart';
 
 enum DateFilter { all, thisWeek, thisMonth, custom }
 
-enum TypeFilter { all, income, expense }
+enum TypeFilter { all, income, expense, saving }
 
 class TransactionFilters {
   const TransactionFilters({
@@ -24,6 +24,7 @@ class TransactionFilters {
     this.customFrom,
     this.customTo,
     this.selectedDay,
+    this.showSavings = false,
   });
 
   final DateFilter dateFilter;
@@ -34,6 +35,13 @@ class TransactionFilters {
   final DateTime? customFrom;
   final DateTime? customTo;
   final DateTime? selectedDay;
+  /// When true, the default "All" view also includes saving transactions.
+  /// Savings are silent by design and stay hidden unless the user opts in.
+  final bool showSavings;
+
+  /// Should saving transactions appear in the list?
+  bool get includesSavings =>
+      typeFilter == TypeFilter.saving || showSavings;
 
   int get activeCount {
     int count = 0;
@@ -42,6 +50,7 @@ class TransactionFilters {
     if (tags.isNotEmpty) count += tags.length;
     if (search.isNotEmpty) count++;
     if (selectedDay != null) count++;
+    if (showSavings) count++;
     return count;
   }
 
@@ -56,6 +65,7 @@ class TransactionFilters {
     DateTime? customFrom,
     DateTime? customTo,
     DateTime? selectedDay,
+    bool? showSavings,
     bool clearValueId = false,
     bool clearCustom = false,
     bool clearTags = false,
@@ -70,6 +80,7 @@ class TransactionFilters {
       customFrom: clearCustom ? null : (customFrom ?? this.customFrom),
       customTo: clearCustom ? null : (customTo ?? this.customTo),
       selectedDay: clearSelectedDay ? null : (selectedDay ?? this.selectedDay),
+      showSavings: showSavings ?? this.showSavings,
     );
   }
 
@@ -121,6 +132,8 @@ class TransactionFilters {
         return 'income';
       case TypeFilter.expense:
         return 'expense';
+      case TypeFilter.saving:
+        return 'saving';
     }
   }
 }
@@ -176,11 +189,24 @@ class FilterBar extends StatelessWidget {
           const SizedBox(width: 6),
           _Separator(),
 
-          // Type segmented: All | ↓ In | ↑ Out
+          // Type segmented: All | ↓ In | ↑ Out | ⊙ Save
           const SizedBox(width: 6),
           _TypeSegment(
             current: filters.typeFilter,
             onChanged: (t) => onChanged(filters.copyWith(typeFilter: t)),
+          ),
+          const SizedBox(width: 6),
+          // Eye toggle: when typeFilter=All, choose whether savings appear too.
+          _FilterChip(
+            icon: filters.showSavings
+                ? Icons.visibility_rounded
+                : Icons.visibility_off_outlined,
+            label: filters.showSavings ? 'Savings' : null,
+            selected: filters.showSavings,
+            color: AppColors.saving,
+            onTap: () => onChanged(
+              filters.copyWith(showSavings: !filters.showSavings),
+            ),
           ),
 
           // Date range
@@ -280,6 +306,8 @@ class FilterBar extends StatelessWidget {
         categories = DefaultTags.expenseCategories;
       case TypeFilter.income:
         categories = DefaultTags.incomeCategories;
+      case TypeFilter.saving:
+        categories = const [];
       case TypeFilter.all:
         categories = [
           ...DefaultTags.expenseCategories,
@@ -340,6 +368,13 @@ class _TypeSegment extends StatelessWidget {
           selected: current == TypeFilter.expense,
           color: AppColors.expense,
           onTap: () => onChanged(TypeFilter.expense),
+        ),
+        const SizedBox(width: 3),
+        _SegBtn(
+          label: '⊙ Save',
+          selected: current == TypeFilter.saving,
+          color: AppColors.saving,
+          onTap: () => onChanged(TypeFilter.saving),
         ),
       ],
     );

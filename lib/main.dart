@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import 'app/router.dart';
 import 'app/theme.dart';
@@ -9,6 +10,9 @@ import 'services/google_drive_service.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  // Offline-first: never reach for fonts.gstatic.com at runtime. Bundled
+  // TTFs in assets/google_fonts/ are used; otherwise fall back to system fonts.
+  GoogleFonts.config.allowRuntimeFetching = false;
   runApp(const ProviderScope(child: DebbieApp()));
 }
 

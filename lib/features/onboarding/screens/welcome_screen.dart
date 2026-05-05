@@ -247,11 +247,13 @@ class _StepPreview extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 10),
-        Text(
-          text,
-          style: Theme.of(
-            context,
-          ).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
+        Expanded(
+          child: Text(
+            text,
+            style: Theme.of(
+              context,
+            ).textTheme.bodyMedium?.copyWith(color: AppColors.textSecondary),
+          ),
         ),
       ],
     );

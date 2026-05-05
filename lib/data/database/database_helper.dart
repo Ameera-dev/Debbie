@@ -2,12 +2,13 @@ import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 
 import 'tables.dart';
+import 'tag_rename.dart';
 
 class DatabaseHelper {
   DatabaseHelper._();
 
   static const _dbName = 'debbie.db';
-  static const _dbVersion = 11;
+  static const dbVersion = 12;
 
   static DatabaseHelper? _instance;
   static Database? _database;
@@ -28,7 +29,7 @@ class DatabaseHelper {
 
     return openDatabase(
       path,
-      version: _dbVersion,
+      version: dbVersion,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
       onConfigure: _onConfigure,
@@ -78,6 +79,14 @@ class DatabaseHelper {
     if (oldVersion < 11) {
       await _migrateV10toV11(db);
     }
+    if (oldVersion < 12) {
+      await _migrateV11toV12(db);
+    }
+  }
+
+  /// v11 → v12: rewrite legacy Indonesian tag taxonomy to English.
+  Future<void> _migrateV11toV12(Database db) async {
+    await renameLegacyTags(db);
   }
 
   /// v1 → v2: replace single `category TEXT` with `tags TEXT` (JSON array).

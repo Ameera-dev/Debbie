@@ -28,6 +28,7 @@ class AppColors {
   // Semantic
   static const income = Color(0xFF5A9E7A); // Seafoam green
   static const expense = Color(0xFFCF7B5F); // Coral
+  static const saving = Color(0xFF6B8EAE); // Quiet sky blue — savings live silently
 
   // Value palette (ocean-inspired, muted)
   static const List<Color> valueColors = [

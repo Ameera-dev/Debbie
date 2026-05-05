@@ -4,6 +4,7 @@ import '../data/models/transaction_item_model.dart';
 import '../data/models/transaction_model.dart';
 import '../shared/utils/date_utils.dart';
 import 'database_provider.dart';
+import 'goals_provider.dart';
 
 final transactionsProvider =
     AsyncNotifierProvider<TransactionsNotifier, List<TransactionModel>>(
@@ -23,6 +24,19 @@ class TransactionsNotifier extends AsyncNotifier<List<TransactionModel>> {
     );
   }
 
+  /// Recompute every goal's current_amount from the saving transactions
+  /// linked to it. Called after any transaction mutation so the goal card —
+  /// the one place savings still surface — stays in sync silently.
+  Future<void> _syncGoalProgressFromSavings() async {
+    final totals = await ref
+        .read(transactionsRepositoryProvider)
+        .getSavingsTotalsByGoal();
+    await ref
+        .read(goalsRepositoryProvider)
+        .syncCurrentAmountsFromSavings(totals);
+    ref.invalidate(goalsProvider);
+  }
+
   Future<void> addSession(
     TransactionModel session,
     List<TransactionItemModel> items,
@@ -31,6 +45,7 @@ class TransactionsNotifier extends AsyncNotifier<List<TransactionModel>> {
         .read(transactionsRepositoryProvider)
         .insertSession(session, items);
     ref.invalidate(pendingTransactionsProvider);
+    await _syncGoalProgressFromSavings();
     await refresh();
   }
 
@@ -52,18 +67,21 @@ class TransactionsNotifier extends AsyncNotifier<List<TransactionModel>> {
         .read(transactionsRepositoryProvider)
         .updateSession(session, items);
     ref.invalidate(pendingTransactionsProvider);
+    await _syncGoalProgressFromSavings();
     await refresh();
   }
 
   Future<void> remove(String id) async {
     await ref.read(transactionsRepositoryProvider).delete(id);
     ref.invalidate(pendingTransactionsProvider);
+    await _syncGoalProgressFromSavings();
     await refresh();
   }
 
   Future<void> confirmPending(String id) async {
     await ref.read(transactionsRepositoryProvider).confirmPending(id);
     ref.invalidate(pendingTransactionsProvider);
+    await _syncGoalProgressFromSavings();
     await refresh();
   }
 
@@ -122,12 +140,29 @@ final allTimeExpenseProvider = FutureProvider<int>((ref) {
   return ref.read(transactionsRepositoryProvider).getAllTimeTotal('expense');
 });
 
-/// The real available balance: total income ever − total expenses ever.
-/// This is the money the user actually has available right now.
+/// Total saved this month. Savings live silently — only used to deduct
+/// from available balance, never shown as a "Saved" line.
+final monthlySavingAmountProvider = FutureProvider<int>((ref) {
+  ref.watch(transactionsProvider);
+  final month = AppDateUtils.currentMonthKey();
+  return ref
+      .read(transactionsRepositoryProvider)
+      .getTotalForMonth(month, 'saving');
+});
+
+/// All-time cumulative savings.
+final allTimeSavingProvider = FutureProvider<int>((ref) {
+  ref.watch(transactionsProvider);
+  return ref.read(transactionsRepositoryProvider).getAllTimeTotal('saving');
+});
+
+/// The real available balance: income − expenses − savings.
+/// Saved money feels gone — it's no longer in your active pool.
 final availableBalanceProvider = FutureProvider<int>((ref) async {
   final income = await ref.watch(allTimeIncomeProvider.future);
   final expenses = await ref.watch(allTimeExpenseProvider.future);
-  return income - expenses;
+  final saved = await ref.watch(allTimeSavingProvider.future);
+  return income - expenses - saved;
 });
 
 final spendingByValueProvider = FutureProvider<Map<String, int>>((ref) {

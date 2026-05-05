@@ -32,6 +32,7 @@ class AppStrings {
   static const editTransactionTitle = 'Edit transaction';
   static const income = 'Income';
   static const expense = 'Expense';
+  static const saving = 'Saving';
   static const descriptionHint = 'What was this for?';
   static const noteHint = 'Add a short note about what this spending meant';
   static const categoryHint = 'Category (optional)';
@@ -208,6 +209,12 @@ class AppStrings {
     'Received with gratitude.',
     'Noticed and appreciated.',
     'Energy arriving, acknowledged.',
+  ];
+
+  static const postSaveSavingMessages = [
+    'Tucked away. Out of sight, working quietly for you.',
+    'Set aside. You can let it go now.',
+    'Quietly saved. It\'ll wait for you in your goal.',
   ];
 
   // Guided journal prompts

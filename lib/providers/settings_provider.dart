@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
 import '../data/database/tables.dart';
 import '../shared/constants/mindfulness.dart';
@@ -32,6 +33,11 @@ class DarkModeNotifier extends AsyncNotifier<bool> {
 final monthlyIncomeProvider = FutureProvider<int>((ref) async {
   final repo = ref.watch(settingsRepositoryProvider);
   return (await repo.getInt(SettingsKeys.monthlyIncome)) ?? 0;
+});
+
+final appVersionProvider = FutureProvider<String>((ref) async {
+  final info = await PackageInfo.fromPlatform();
+  return info.version;
 });
 
 // ---------------------------------------------------------------------------
@@ -140,6 +146,50 @@ class GeminiApiKeyNotifier extends AsyncNotifier<String?> {
       await repo.set(SettingsKeys.geminiApiKey, key.trim());
       state = AsyncValue.data(key.trim());
     }
+  }
+}
+
+/// Tracks whether the user has seen the Today's Focus walkthrough.
+/// First-time dashboard visit auto-opens the intro; afterwards it's
+/// only available via the `?` icon in the card header.
+final todayFocusIntroSeenProvider =
+    AsyncNotifierProvider<TodayFocusIntroSeenNotifier, bool>(
+      TodayFocusIntroSeenNotifier.new,
+    );
+
+class TodayFocusIntroSeenNotifier extends AsyncNotifier<bool> {
+  @override
+  Future<bool> build() async {
+    final repo = ref.watch(settingsRepositoryProvider);
+    return repo.getBool(SettingsKeys.todayFocusIntroSeen);
+  }
+
+  Future<void> markSeen() async {
+    if (state.valueOrNull == true) return;
+    state = const AsyncValue.data(true);
+    final repo = ref.read(settingsRepositoryProvider);
+    await repo.setBool(SettingsKeys.todayFocusIntroSeen, value: true);
+  }
+}
+
+final balanceVisibleProvider =
+    AsyncNotifierProvider<BalanceVisibleNotifier, bool>(
+      BalanceVisibleNotifier.new,
+    );
+
+class BalanceVisibleNotifier extends AsyncNotifier<bool> {
+  @override
+  Future<bool> build() async {
+    final repo = ref.watch(settingsRepositoryProvider);
+    return repo.getBool(SettingsKeys.balanceVisible, defaultValue: true);
+  }
+
+  Future<void> toggle() async {
+    final current = state.valueOrNull ?? true;
+    final next = !current;
+    state = AsyncValue.data(next);
+    final repo = ref.read(settingsRepositoryProvider);
+    await repo.setBool(SettingsKeys.balanceVisible, value: next);
   }
 }
 

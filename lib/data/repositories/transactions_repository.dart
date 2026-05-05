@@ -358,6 +358,27 @@ class TransactionsRepository {
     };
   }
 
+  /// Sum of all recorded saving items grouped by goal_id.
+  /// Used to keep goals.current_amount in sync after saving mutations.
+  Future<Map<String, int>> getSavingsTotalsByGoal() async {
+    final db = await _db.database;
+    final rows = await db.rawQuery(
+      '''
+      SELECT ti.goal_id, COALESCE(SUM(ti.amount), 0) AS total
+      FROM ${Tables.transactionItems} ti
+      JOIN ${Tables.transactions} t ON t.id = ti.transaction_id
+      WHERE t.type = 'saving'
+        AND t.status = ?
+        AND ti.goal_id IS NOT NULL
+      GROUP BY ti.goal_id
+      ''',
+      [TransactionModel.recordedStatus],
+    );
+    return {
+      for (final r in rows) r['goal_id'] as String: (r['total'] as int? ?? 0),
+    };
+  }
+
   Future<List<String>> getDistinctDescriptions() async {
     final db = await _db.database;
     final rows = await db.rawQuery(

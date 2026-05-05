@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "838535166996",
+    "project_id": "debbie-cna1f",
+    "storage_bucket": "debbie-cna1f.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:838535166996:android:3d9b613278d4b5e777bb01",
+        "android_client_info": {
+          "package_name": "com.debbie.debbie"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "838535166996-9nr246t88espimiuekn98mv7rm2ntj3l.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.debbie.debbie",
+            "certificate_hash": "757e713fd24def2f89569a8d7b71bfa38ed66190"
+          }
+        },
+        {
+          "client_id": "838535166996-r69vmhulh9b4tcejikcf655fsfh6cicf.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAlBqEYQIQkKFe49RuD6GibaejOvi81jzc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "838535166996-r69vmhulh9b4tcejikcf655fsfh6cicf.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
